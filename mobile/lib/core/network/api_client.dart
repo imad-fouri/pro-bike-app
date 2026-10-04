@@ -142,7 +142,7 @@ class ApiClient {
     if (res.statusCode >= 200 && res.statusCode < 300) {
       return body.isEmpty
           ? <String, dynamic>{}
-          : jsonDecode(body) as Map<String, dynamic>;
+          : _decodeObject(res.statusCode, body);
     }
     throw _parseError(res.statusCode, body);
   }
@@ -229,9 +229,31 @@ class ApiClient {
     }
     if (res.statusCode >= 200 && res.statusCode < 300) {
       if (res.body.isEmpty) return {};
-      return jsonDecode(res.body) as Map<String, dynamic>;
+      return _decodeObject(res.statusCode, res.body);
     }
     throw _parseError(res.statusCode, res.body);
+  }
+
+  /// Decodes a success body that must be a JSON object.
+  ///
+  /// A 2xx carrying HTML, a bare array, or truncated JSON is a contract
+  /// violation, not a programming error: it must surface as an ApiException so
+  /// callers' `catch (ApiException)` handles it instead of a raw
+  /// FormatException/TypeError escaping through the UI.
+  Map<String, dynamic> _decodeObject(int status, String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      throw const FormatException('Expected a JSON object.');
+    } on ApiException {
+      rethrow;
+    } on Exception {
+      throw ApiException(
+        status,
+        'INVALID_RESPONSE',
+        'Unexpected response from server.',
+      );
+    }
   }
 
   /// Central authenticated-request recovery.

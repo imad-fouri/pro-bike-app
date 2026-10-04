@@ -940,3 +940,74 @@ async def test_openapi_exposes_the_notification_surface(client):
         f"{DEVICES}/{{device_id}}",
     ]:
         assert expected in paths, expected
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.6 concurrency: one business event, one notification
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_duplicate_friend_request_notifies_exactly_once(client):
+    """Five simultaneous identical requests create one row and one notification.
+
+    Deduplication is enforced by a unique constraint, so a race that slips past
+    the pre-check must fail at commit — and the failure must be a clean 409, not
+    a 500 that the client shows as a crash.
+    """
+    a, aid = await _user(client, "a")
+    b, bid = await _user(client, "b")
+
+    results = await asyncio.gather(
+        *[
+            client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
+            for _ in range(5)
+        ]
+    )
+    codes = sorted(r.status_code for r in results)
+    assert codes == [201, 409, 409, 409, 409], codes
+
+    inbox = await _notifs(client, b)
+    requests = [i for i in inbox["items"] if i["type"] == "friend_request"]
+    assert len(requests) == 1, f"target holds {len(requests)} friend_request rows"
+    assert requests[0]["actor_user_id"] == aid
+    assert (await _notifs(client, a))["total"] == 0
+
+
+async def test_concurrent_team_archive_notifies_each_member_once(client):
+    """Two simultaneous archives: one 200, one 404, and no second notification wave."""
+    a, _ = await _user(client, "a")
+    b, bid = await _user(client, "b")
+    team = (await client.post(f"{TEAMS}", json={"name": "Atlas CC"}, headers=a)).json()
+    inv = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
+    await client.post(f"{TEAMS}/invitations/{inv.json()['id']}/accept", headers=b)
+
+    first, second = await asyncio.gather(
+        client.delete(f"{TEAMS}/{team['id']}", headers=a),
+        client.delete(f"{TEAMS}/{team['id']}", headers=a),
+    )
+    assert sorted([first.status_code, second.status_code]) == [200, 404]
+
+    for headers in (a, b):
+        archived = [
+            i for i in (await _notifs(client, headers))["items"] if i["type"] == "team_archived"
+        ]
+        assert len(archived) == 1, f"holds {len(archived)} team_archived rows"
+
+
+async def test_concurrent_mark_read_is_idempotent(client):
+    """Reading the same notification twice concurrently leaves one read row."""
+    a, aid = await _user(client, "a")
+    b, bid = await _user(client, "b")
+    assert (
+        await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
+    ).status_code == 201
+    item = (await _notifs(client, b))["items"][0]
+
+    results = await asyncio.gather(
+        *[client.post(f"{NOTIF}/{item['id']}/read", headers=b) for _ in range(4)]
+    )
+    assert {r.status_code for r in results} <= {200, 204}
+    inbox = await _notifs(client, b)
+    assert inbox["items"][0]["is_unread"] is False
+    assert (await client.get(f"{NOTIF}/unread-count", headers=b)).json()["unread_count"] == 0
+    assert aid

@@ -476,9 +476,14 @@ void main() {
         (_) async => http.Response('this is not JSON', 200),
       );
       final repo = CoachRepository(api(broken));
+      // Phase 8.6: a 2xx body that is not a JSON object is now mapped to
+      // ApiException/INVALID_RESPONSE instead of leaking a raw FormatException,
+      // so callers can distinguish a contract violation from a network fault.
       await expectLater(
         repo.ask(intent: CoachIntent.weeklySummary, message: '', locale: 'en'),
-        throwsA(isA<FormatException>()),
+        throwsA(
+          isA<ApiException>().having((e) => e.code, 'code', 'INVALID_RESPONSE'),
+        ),
       );
     });
 

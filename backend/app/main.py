@@ -1,7 +1,5 @@
 """CycleCoach API — app factory with versioned routing, security, logging."""
 
-import uuid
-
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -37,8 +35,15 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def correlation(request: Request, call_next):  # type: ignore[no-untyped-def]
-        rid = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
-        new_request_id()
+        # Accept a client-supplied id only in a sanitized shape (our own ids
+        # are 12 hex chars); otherwise mint one. The SAME id goes into the
+        # logs and the response header, so a reported id is searchable.
+        # ASCII-only: a non-ASCII or header-breaking value is dropped rather
+        # than reflected back into a response header.
+        raw = (request.headers.get("X-Request-ID") or "").strip()[:64]
+        shape = raw.replace("-", "").replace("_", "")
+        incoming = raw if shape.isascii() and shape.isalnum() else ""
+        rid = new_request_id(incoming or None)
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
         response.headers["X-Content-Type-Options"] = "nosniff"

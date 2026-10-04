@@ -216,6 +216,24 @@ async def ingest(
     if ride.status in (RideStatus.COMPLETED, RideStatus.DISCARDED):
         raise RideError("RIDE_FINISHED", "Ride is already finished.", 409)
 
+    # Serialize concurrent uploads of the SAME ride on its row: two chunks
+    # racing the read-then-write dedupe below would otherwise both pass and
+    # one would die on the unique constraints. `populate_existing` refreshes
+    # the caller's instance in place so later reads see committed state.
+    locked = await db.execute(
+        select(Ride)
+        .where(Ride.id == ride.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    ride = locked.scalar_one()
+    # Re-check on the locked row: the status may have changed between the
+    # router's read and this lock (e.g. a concurrent pause/finish).
+    if ride.status == RideStatus.PAUSED:
+        raise RideError("RIDE_PAUSED", "Ride is paused. Resume to upload points.", 409)
+    if ride.status in (RideStatus.COMPLETED, RideStatus.DISCARDED):
+        raise RideError("RIDE_FINISHED", "Ride is already finished.", 409)
+
     # Existing keys for idempotent resume.
     res = await db.execute(
         select(RidePoint.client_point_uuid, RidePoint.seq).where(RidePoint.ride_id == ride.id)
@@ -289,7 +307,19 @@ async def ingest(
     ride.moving_seconds = int(state.moving_s)
     ride.max_speed_m_s = Decimal(str(round(state.max_speed_m_s, 3)))
     ride.updated_at = _now()
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Backstop for the row lock above: a lost race surfaces here instead
+        # of as a 500. Nothing from this chunk was stored (all-or-nothing), so
+        # the client can safely re-read state and retry; report conflict, not
+        # internal error.
+        await db.rollback()
+        raise RideError(
+            "CHUNK_CONFLICT",
+            "Chunk conflicts with a concurrent upload; retry with fresh state.",
+            409,
+        ) from None
     return accepted, rejected, duplicates
 
 

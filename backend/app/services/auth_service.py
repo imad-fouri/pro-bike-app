@@ -1,5 +1,6 @@
 """Auth service: registration, login, rotation, logout, reset, verify."""
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,8 @@ from app.models.user import (
 )
 from app.schemas.auth import LoginIn, RegisterIn
 from app.services.email import OutboxMessage, email_service
+
+log = logging.getLogger("cyclecoach")
 
 
 def _now() -> datetime:
@@ -87,8 +90,11 @@ async def _new_session(
 async def login(db: AsyncSession, data: LoginIn) -> tuple[User, str, str]:
     user = await _get_user_by_email(db, data.email)
     if user is None or not security.verify_password(data.password, user.password_hash):
+        # Deliberately no identity: an observer must not learn which half failed.
+        log.info("auth.login_failed")
         raise AuthError("INVALID_CREDENTIALS", "Invalid email or password.", 401)
     if user.status != UserStatus.ACTIVE or user.deleted_at is not None:
+        log.info("auth.login_inactive", extra={"user_id": str(user.id)})
         raise AuthError("ACCOUNT_INACTIVE", "This account is not active.", 403)
     user.last_login_at = _now()
     user.updated_at = _now()
@@ -101,9 +107,15 @@ async def login(db: AsyncSession, data: LoginIn) -> tuple[User, str, str]:
 async def refresh(db: AsyncSession, presented: str) -> tuple[str, str]:
     """Rotate. Reuse of an already-rotated token revokes the whole family."""
     digest = security.hash_token(presented)
-    res = await db.execute(select(RefreshSession).where(RefreshSession.refresh_hash == digest))
+    # Row lock: two concurrent presentations of one token must serialize, so
+    # the second sees the revoked row and trips reuse detection instead of
+    # minting a second live descendant.
+    res = await db.execute(
+        select(RefreshSession).where(RefreshSession.refresh_hash == digest).with_for_update()
+    )
     session = res.scalar_one_or_none()
     if session is None:
+        log.info("auth.refresh_invalid")
         raise AuthError("INVALID_REFRESH", "Invalid refresh token.", 401)
     if session.revoked_at is not None:
         # Compromise containment: burn the family, force re-login everywhere.
@@ -113,6 +125,10 @@ async def refresh(db: AsyncSession, presented: str) -> tuple[str, str]:
         for s in fam.scalars():
             s.revoked_at = s.revoked_at or _now()
         await db.commit()
+        log.info(
+            "auth.refresh_reused",
+            extra={"family_id": str(session.family_id), "user_id": str(session.user_id)},
+        )
         raise AuthError("REFRESH_REUSED", "Session compromised. Please log in again.", 401)
     if session.expires_at < _now():
         raise AuthError("REFRESH_EXPIRED", "Session expired. Please log in again.", 401)
@@ -158,6 +174,7 @@ async def logout_all(db: AsyncSession, user: User) -> int:
         s.revoked_at = _now()
         count += 1
     await db.commit()
+    log.info("auth.logout_all", extra={"user_id": str(user.id), "revoked": count})
     return count
 
 
@@ -201,6 +218,15 @@ async def confirm_password_reset(db: AsyncSession, token: str, new_password: str
     user.password_hash = security.hash_password(new_password)
     user.updated_at = _now()
     row.used_at = _now()
+    # A password change must close every takeover path: any OTHER outstanding
+    # reset token for this user dies here too, not just the presented one.
+    others = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None)
+        )
+    )
+    for other in others.scalars():
+        other.used_at = _now()
     # Burn all sessions: password change logs out every device.
     fam = await db.execute(
         select(RefreshSession).where(

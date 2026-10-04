@@ -240,7 +240,10 @@ async def list_members(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=MAX_LIST),
 ) -> TeamMemberPage:
-    items, total = await team_service.list_members(db, user, team_id, page, page_size)
+    try:
+        items, total = await team_service.list_members(db, user, team_id, page, page_size)
+    except TeamError as exc:
+        raise _fail(exc) from exc
     return TeamMemberPage(
         items=[TeamMemberOut.model_validate(v) for v in items],
         total=total,
