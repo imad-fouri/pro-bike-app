@@ -1,7 +1,7 @@
 # PHASE 8.6 RESULT - Production Hardening and Session Integrity
 
 Date: 2026-10-04
-Status: **PASS (local + live); remote CI recorded below**
+Status: **PASS (local + live + remote CI run `37229175806`)**
 Scope: close the Phase 8.5 audit's residual production risks - concurrent-write
 races, unbounded in-process state, a logout/refresh race on the client, an
 always-green health endpoint, and invisible `extra=` log fields. **No product
@@ -295,5 +295,25 @@ deliberately not committed.
 
 ## 7. Remote CI
 
-Recorded after the push that carries this phase; see section 8 for the run id and
-the head SHA.
+| Field | Value |
+|---|---|
+| Workflow | `ci` (`.github/workflows/ci.yml`) |
+| Run | `37229175806` |
+| Head SHA | `769df32` |
+| `backend` job | success |
+| `mobile` job | success |
+| Conclusion | **success** |
+
+Both jobs passed on the first run of this commit: dependency install, Ruff,
+mypy, the full backend suite, `flutter pub get`, `dart format
+--set-exit-if-changed`, `flutter analyze`, the full Flutter suite, and the web
+release build. The preceding docs commit `53304a6` also passed
+(`37204625121`), so the green lineage is unbroken from `33f3edd` through
+`769df32`.
+
+## 8. Phase result
+
+**PASS.** The Phase 8.5 audit's residual production risks are closed with
+deterministic coverage, every local gate and all four live smoke suites are
+green, and the change is green on remote CI. Phase 8.7 and Phase 9 were not
+started.
