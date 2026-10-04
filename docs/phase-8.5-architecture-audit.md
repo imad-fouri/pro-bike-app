@@ -516,3 +516,37 @@ I also did **not** correct one in-code docstring that contradicts its own functi
 **What is genuinely strong, and should not be discounted because of the above:** ownership scoped in the SQL `WHERE` clause across all ~116 endpoints with **no IDOR in any of the 12 routers**; the deterministic Training Engine provably authoritative over the AI layer, with no numeric channel from model to database; the blocked-DM policy enforced by writing **no row at all**; push payloads of exactly three keys; refresh-token reuse detection burning the whole session family; 44/44 FKs declaring `ondelete`; five well-chosen partial unique indexes; 7/7 partial-index predicates matching their query sites; idempotency keys persisted **before** the network call in both rides and chat; a 100%-typed Drift layer with no raw SQL; and genuinely tested EN/FR/AR with working RTL.
 
 **Do not begin the next feature phase until `B1`–`B5` and `H1`–`H2` are resolved.** The recommended next phase is **Phase 8.6 — Production Hardening & Session Integrity**, scoped in §19. Critically, `B1` (token refresh) and `B3` (notification fan-out) are each small in code size but must be treated as high-risk changes: a naive refresh implementation trips ADR-04's family revocation and logs users out of every device, and the `B3` fix must land together with a corrected test or the same false confidence recurs.
+
+---
+
+## Remediation addendum (2026-10-04) — does not alter the audit above
+
+The five blockers identified in §21 were remediated under
+`docs/phase-8.5-remediation-report.md`. Verified outcomes:
+
+- **B1** fixed: single-flight refresh in `ApiClient` with retry-once and safe
+  expiry; proven by 6 Flutter unit tests and a live 3-concurrent → 1-refresh
+  check against the real backend (temporary test, removed afterwards).
+- **B2** fixed: durable `finalizing`/`pending_sync` states, full drain before
+  `completed`, headless `recoverPendingSync()`; proven by 7 drain/recovery
+  tests (100/101/500/1000 points, failure, kill-mid-drain, restart).
+- **B3** fixed: per-recipient dedupe key for team archive; proven live
+  (3 members → 3 distinct rows) and by re-running the new test against the
+  original code (fails for 2–3 members, as expected).
+- **B4** fixed: the count-only test was replaced with recipient/type/team
+  assertions; the revert check above is the evidence.
+- **B5** fixed: `require_production_secrets()` enforced in `create_app()`;
+  proven by unit tests and real-process checks (placeholder/short rejected,
+  valid accepted, dev unaffected).
+- **H1** fixed: explicit email provider selection; production fails at import
+  without a real provider; dev outbox bounded at 100.
+- **H2** partially addressed: project-scoped repository created, remediation
+  committed (`b089887`); CI itself has no remote to run on — see the
+  remediation report §8 and §10.
+
+Final gates at remediation close: backend **564 passed**, Flutter **441
+passed**, ruff/mypy/analyze/format clean, single migration head,
+live smoke **101/101 × 2**, live A–D **15/15**.
+
+Remediation verdict: **BLOCKED solely on CI execution** (no remote exists).
+All five original blockers are closed and proven.
