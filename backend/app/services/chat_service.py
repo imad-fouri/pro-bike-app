@@ -579,7 +579,6 @@ async def open_direct(db: AsyncSession, viewer: User, target_id: uuid.UUID) -> d
         )
 
     now = _now()
-    low, high = (viewer.id, target_id) if viewer.id < target_id else (target_id, viewer.id)
     conversation = Conversation(
         kind=ConversationKind.DIRECT,
         team_id=None,

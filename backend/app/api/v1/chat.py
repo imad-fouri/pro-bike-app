@@ -35,7 +35,7 @@ from app.schemas.chat import (
     SendResult,
 )
 from app.services import chat_service
-from app.services.chat_service import ChatError, MAX_HISTORY
+from app.services.chat_service import MAX_HISTORY, ChatError
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 

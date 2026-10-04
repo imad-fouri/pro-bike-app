@@ -236,5 +236,7 @@ class TeamInvitation(Base):
             "invited_user_id",
             "status",
         ),
-        CheckConstraint("invited_user_id != invited_by_user_id", name="ck_team_invitations_no_self"),
+        CheckConstraint(
+            "invited_user_id != invited_by_user_id", name="ck_team_invitations_no_self"
+        ),
     )

@@ -70,9 +70,7 @@ async def _invite_and_accept(client, inviter_headers, team_id, invitee_headers, 
     )
     assert r.status_code == 201, r.text
     inv_id = r.json()["id"]
-    r2 = await client.post(
-        f"{TEAMS}/invitations/{inv_id}/accept", headers=invitee_headers
-    )
+    r2 = await client.post(f"{TEAMS}/invitations/{inv_id}/accept", headers=invitee_headers)
     assert r2.status_code == 200, r2.text
     return inv_id
 
@@ -189,9 +187,7 @@ async def test_list_my_teams_pagination(client):
 
 async def test_handle_canonicalization(client):
     h, _ = await _user(client, "a")
-    r = await client.post(
-        f"{TEAMS}", json={"name": "Team", "handle": "  MiXeD_Case  "}, headers=h
-    )
+    r = await client.post(f"{TEAMS}", json={"name": "Team", "handle": "  MiXeD_Case  "}, headers=h)
     assert r.status_code == 201
     assert r.json()["handle"] == "mixed_case"
 
@@ -200,9 +196,7 @@ async def test_handle_uniqueness_across_teams(client):
     a, _ = await _user(client, "a")
     b, _ = await _user(client, "b")
     await _team(client, a, name="First", handle="shared_handle")
-    r = await client.post(
-        f"{TEAMS}", json={"name": "Second", "handle": "shared_handle"}, headers=b
-    )
+    r = await client.post(f"{TEAMS}", json={"name": "Second", "handle": "shared_handle"}, headers=b)
     assert r.status_code == 409
     assert r.json()["error"]["code"] == "TEAM_HANDLE_TAKEN"
 
@@ -211,18 +205,14 @@ async def test_handle_case_variants_collide(client):
     a, _ = await _user(client, "a")
     b, _ = await _user(client, "b")
     await _team(client, a, name="First", handle="atlas")
-    r = await client.post(
-        f"{TEAMS}", json={"name": "Second", "handle": "ATLAS"}, headers=b
-    )
+    r = await client.post(f"{TEAMS}", json={"name": "Second", "handle": "ATLAS"}, headers=b)
     assert r.status_code == 409
 
 
 async def test_invalid_handles_rejected(client):
     h, _ = await _user(client, "a")
     for bad in ["ab", "a" * 31, "12345", "a.b.c", ".leading", "trailing_", "has space"]:
-        r = await client.post(
-            f"{TEAMS}", json={"name": "T", "handle": bad}, headers=h
-        )
+        r = await client.post(f"{TEAMS}", json={"name": "T", "handle": bad}, headers=h)
         assert r.status_code in (422, 409), f"{bad} was accepted"
 
 
@@ -261,9 +251,7 @@ async def test_public_team_is_searchable_and_joinable(client):
 async def test_private_team_hidden_from_stranger_search(client):
     a, _ = await _user(client, "a")
     c, _ = await _user(client, "c")
-    team = await _team(
-        client, a, name="Secret Squad", handle="secret_squad", visibility="private"
-    )
+    team = await _team(client, a, name="Secret Squad", handle="secret_squad", visibility="private")
     found = await client.get(f"{TEAMS}/search", params={"q": "secret"}, headers=c)
     assert all(t["id"] != team["id"] for t in found.json()["items"])
 
@@ -305,9 +293,7 @@ async def test_admin_can_manage_members(client):
     assert r.json()["role"] == "admin"
 
     # Admin can invite and remove.
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": cid}, headers=b
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": cid}, headers=b)
     assert r.status_code == 201
     inv = r.json()["id"]
     await client.post(f"{TEAMS}/invitations/{inv}/accept", headers=c)
@@ -319,14 +305,12 @@ async def test_admin_can_manage_members(client):
 async def test_member_cannot_invite_or_remove(client):
     a, _ = await _user(client, "a")
     b, bid = await _user(client, "b")
-    c, cid = await _user(client, "c")
+    _c, cid = await _user(client, "c")
     team = await _team(client, a, name="Crew")
     await _invite_and_accept(client, a, team["id"], b, bid)
 
     # A plain member inviting someone → 404 (no standing to manage).
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": cid}, headers=b
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": cid}, headers=b)
     assert r.status_code == 404
 
     # A plain member cannot remove ANY member, not even themselves. Removing
@@ -397,7 +381,7 @@ async def test_owner_row_is_immutable(client):
 
 
 async def test_owner_cannot_leave(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     team = await _team(client, a, name="Crew")
     r = await client.delete(f"{TEAMS}/{team['id']}/membership", headers=a)
     assert r.status_code == 409
@@ -426,7 +410,9 @@ async def test_idor_stranger_cannot_mutate_team(client):
     team = await _team(client, a, name="Crew")
 
     # C is not a member of a public team. Every mutation → 404.
-    assert (await client.patch(f"{TEAMS}/{team['id']}", json={"name": "X"}, headers=c)).status_code == 404
+    assert (
+        await client.patch(f"{TEAMS}/{team['id']}", json={"name": "X"}, headers=c)
+    ).status_code == 404
     assert (await client.delete(f"{TEAMS}/{team['id']}", headers=c)).status_code == 404
     assert (await client.delete(f"{TEAMS}/{team['id']}/membership", headers=c)).status_code == 404
     assert (await client.get(f"{TEAMS}/{team['id']}/join-requests", headers=c)).status_code == 404
@@ -444,12 +430,8 @@ async def test_patch_on_a_private_team_is_404_not_403(client):
     private = await _team(client, a, name="Secret", visibility="private")
     public = await _team(client, a, name="Open", visibility="public")
 
-    r_private = await client.patch(
-        f"{TEAMS}/{private['id']}", json={"name": "Hijacked"}, headers=c
-    )
-    r_public = await client.patch(
-        f"{TEAMS}/{public['id']}", json={"name": "Hijacked"}, headers=c
-    )
+    r_private = await client.patch(f"{TEAMS}/{private['id']}", json={"name": "Hijacked"}, headers=c)
+    r_public = await client.patch(f"{TEAMS}/{public['id']}", json={"name": "Hijacked"}, headers=c)
     assert r_private.status_code == 404
     # Identical answer for a team C could legitimately have seen: the status
     # alone must not distinguish "private" from "public but not yours".
@@ -476,8 +458,8 @@ async def test_idor_member_cannot_remove_owner(client):
 
 
 async def test_idor_cannot_accept_another_teams_request(client):
-    a, aid = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    a, _aid = await _user(client, "a")
+    b, _bid = await _user(client, "b")
     c, _ = await _user(client, "c")
     team_a = await _team(client, a, name="Team A", visibility="private")
     team_c = await _team(client, c, name="Team C", visibility="private")
@@ -487,26 +469,20 @@ async def test_idor_cannot_accept_another_teams_request(client):
     req_id = reqs.json()["items"][0]["id"]
 
     # C (owner of their own team, but not of team A) cannot accept B's request.
-    r = await client.post(
-        f"{TEAMS}/{team_a['id']}/join-requests/{req_id}/accept", headers=c
-    )
+    r = await client.post(f"{TEAMS}/{team_a['id']}/join-requests/{req_id}/accept", headers=c)
     assert r.status_code == 404
 
     # Nor against their own team id (mismatched request).
-    r = await client.post(
-        f"{TEAMS}/{team_c['id']}/join-requests/{req_id}/accept", headers=c
-    )
+    r = await client.post(f"{TEAMS}/{team_c['id']}/join-requests/{req_id}/accept", headers=c)
     assert r.status_code == 404
 
 
 async def test_idor_cannot_accept_another_users_invitation(client):
     a, _ = await _user(client, "a")
-    b, bid = await _user(client, "b")
-    c, cid = await _user(client, "c")
+    _b, bid = await _user(client, "b")
+    c, _cid = await _user(client, "c")
     team = await _team(client, a, name="Crew")
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     inv_id = r.json()["id"]
     # C tries to redeem B's invitation.
     r = await client.post(f"{TEAMS}/invitations/{inv_id}/accept", headers=c)
@@ -529,11 +505,13 @@ async def test_duplicate_membership_rejected(client):
 
 
 async def test_private_team_join_request_lifecycle(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Secret", visibility="private")
 
-    await client.post(f"{TEAMS}/{team['id']}/join-requests", json={"message": "let me in"}, headers=b)
+    await client.post(
+        f"{TEAMS}/{team['id']}/join-requests", json={"message": "let me in"}, headers=b
+    )
     reqs = await client.get(f"{TEAMS}/{team['id']}/join-requests", headers=a)
     assert reqs.status_code == 200
     items = reqs.json()["items"]
@@ -565,7 +543,7 @@ async def test_duplicate_join_request_rejected(client):
 
 
 async def test_reject_join_request_consumes_it(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Secret", visibility="private")
     await client.post(f"{TEAMS}/{team['id']}/join", headers=b)
@@ -578,7 +556,7 @@ async def test_reject_join_request_consumes_it(client):
 
 
 async def test_cannot_request_own_team(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     team = await _team(client, a, name="Crew", visibility="private")
     r = await client.post(f"{TEAMS}/{team['id']}/join", headers=a)
     assert r.status_code == 409
@@ -613,9 +591,7 @@ async def test_invitation_decline(client):
     a, _ = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     inv_id = r.json()["id"]
     r = await client.post(f"{TEAMS}/invitations/{inv_id}/reject", headers=b)
     assert r.status_code == 200
@@ -627,9 +603,7 @@ async def test_invitation_revoke(client):
     a, _ = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     inv_id = r.json()["id"]
     r = await client.delete(f"{TEAMS}/{team['id']}/invitations/{inv_id}", headers=a)
     assert r.status_code == 200
@@ -640,7 +614,7 @@ async def test_invitation_revoke(client):
 
 async def test_duplicate_invitation_rejected(client):
     a, _ = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    _b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
     await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
@@ -651,9 +625,7 @@ async def test_reinvite_after_decline_allowed(client):
     a, _ = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     inv_id = r.json()["id"]
     await client.post(f"{TEAMS}/invitations/{inv_id}/reject", headers=b)
     # The pair is freed, so a fresh invite works.
@@ -666,9 +638,7 @@ async def test_invite_collapses_pending_join_request(client):
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew", visibility="private")
     await client.post(f"{TEAMS}/{team['id']}/join", headers=b)
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     assert r.status_code == 201
     # The redundant ask is gone.
     reqs = await client.get(f"{TEAMS}/{team['id']}/join-requests", headers=a)
@@ -678,9 +648,7 @@ async def test_invite_collapses_pending_join_request(client):
 async def test_cannot_invite_self(client):
     a, aid = await _user(client, "a")
     team = await _team(client, a, name="Crew")
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": aid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": aid}, headers=a)
     assert r.status_code == 422
 
 
@@ -689,9 +657,7 @@ async def test_cannot_invite_existing_member(client):
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
     await _invite_and_accept(client, a, team["id"], b, bid)
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
     assert r.status_code == 409
 
 
@@ -704,14 +670,10 @@ async def _friend(client, a_headers, b_headers):
     """Make A and B friends through the social API."""
     me_b = await client.get(f"{SOCIAL}/profile/me", headers=b_headers)
     bid = me_b.json()["user_id"]
-    r = await client.post(
-        f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a_headers
-    )
+    r = await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a_headers)
     assert r.status_code == 201
     req_id = r.json()["id"]
-    r = await client.post(
-        f"{SOCIAL}/friend-requests/{req_id}/accept", headers=b_headers
-    )
+    r = await client.post(f"{SOCIAL}/friend-requests/{req_id}/accept", headers=b_headers)
     assert r.status_code == 200
     return bid
 
@@ -722,7 +684,7 @@ async def test_block_prevents_new_team_association(client):
     The block refuses a NEW association only; nothing is deleted (see the
     sibling tests that assert existing state survives a block).
     """
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
 
@@ -744,15 +706,13 @@ async def test_block_prevents_new_team_association(client):
 
 
 async def test_block_prevents_invite(client):
-    a, aid = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    _a, aid = await _user(client, "a")
+    b, _bid = await _user(client, "b")
     team = await _team(client, b, name="B Crew")
     r = await client.post(f"{SOCIAL}/blocks", json={"user_id": aid}, headers=b)
     assert r.status_code == 201
     # A cannot be invited into B's team.
-    r = await client.post(
-        f"{TEAMS}/{team['id']}/invitations", json={"user_id": aid}, headers=b
-    )
+    r = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": aid}, headers=b)
     assert r.status_code == 404
 
 
@@ -761,7 +721,7 @@ async def test_block_does_not_evict_existing_member(client):
 
     A block refuses NEW association actions. It deletes nothing.
     """
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
     await _invite_and_accept(client, a, team["id"], b, bid)
@@ -775,9 +735,7 @@ async def test_block_does_not_evict_existing_member(client):
     assert any(m["user_id"] == bid for m in members.json()["items"])
 
     # And B can still leave voluntarily; the block did not lock them in.
-    assert (
-        await client.delete(f"{TEAMS}/{team['id']}/membership", headers=b)
-    ).status_code == 200
+    assert (await client.delete(f"{TEAMS}/{team['id']}/membership", headers=b)).status_code == 200
 
 
 async def test_block_uses_the_existing_social_wall_and_teams_do_not_interfere(client):
@@ -789,7 +747,7 @@ async def test_block_uses_the_existing_social_wall_and_teams_do_not_interfere(cl
     and unblocking must not rebuild anything. This test pins the boundary so a
     future "make blocks delete team rows too" change cannot slip in unannounced.
     """
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     await _friend(client, a, b)
     team = await _team(client, a, name="Crew")
@@ -815,7 +773,7 @@ async def test_block_uses_the_existing_social_wall_and_teams_do_not_interfere(cl
 
 async def test_friendship_survives_leaving_team(client):
     """CRITICAL INVARIANT: leaving a team does not unfriend anyone."""
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     await _friend(client, a, b)
     team = await _team(client, a, name="Crew")
@@ -832,7 +790,7 @@ async def test_friendship_survives_leaving_team(client):
 
 async def test_unblock_does_not_recreate_membership(client):
     """Unblocking restores nothing. A rider who genuinely left must re-join."""
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
     await _invite_and_accept(client, a, team["id"], b, bid)
@@ -872,7 +830,7 @@ async def test_concurrent_joins_resolve_to_one_membership(client):
 
 
 async def test_concurrent_accepts_of_one_request_converge(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Secret", visibility="private")
     await client.post(f"{TEAMS}/{team['id']}/join", headers=b)
@@ -891,7 +849,7 @@ async def test_concurrent_accepts_of_one_request_converge(client):
 
 
 async def test_member_count_is_consistent_under_concurrent_removes(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     c, cid = await _user(client, "c")
     team = await _team(client, a, name="Crew")
@@ -1008,7 +966,7 @@ async def test_unauthenticated_team_endpoints_401(client):
 
 
 async def test_no_private_or_location_keys_in_team_payloads(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = await _team(client, a, name="Crew")
     await _invite_and_accept(client, a, team["id"], b, bid)
@@ -1030,7 +988,7 @@ async def test_no_private_or_location_keys_in_team_payloads(client):
 
 
 async def test_team_routes_in_openapi(client):
-    h, _ = await _user(client, "a")
+    _h, _ = await _user(client, "a")
     r = await client.get("/openapi.json")
     assert r.status_code == 200
     paths = r.json()["paths"]

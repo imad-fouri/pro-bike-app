@@ -319,7 +319,7 @@ async def test_team_invitation_notifies_only_the_invitee(client):
 
 async def test_team_join_request_notifies_managers_only(client):
     a, _ = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    b, _bid = await _user(client, "b")
     team = (
         await client.post(
             f"{TEAMS}", json={"name": "Private CC", "visibility": "private"}, headers=a
@@ -403,7 +403,7 @@ async def test_team_archive_notifies_every_member_exactly_once(client, member_co
 
 
 async def test_chat_message_notifies_the_recipient(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     dm = (await client.post(f"{CHAT}/direct", params={"target_user_id": bid}, headers=a)).json()
     r = await client.post(
@@ -579,7 +579,7 @@ async def test_concurrent_sends_of_distinct_messages_notify_each_recipient_once(
 
 
 async def test_the_same_client_id_from_two_senders_makes_two_notifications(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     team = (await client.post(f"{TEAMS}", json={"name": "Atlas CC"}, headers=a)).json()
     inv = await client.post(f"{TEAMS}/{team['id']}/invitations", json={"user_id": bid}, headers=a)
@@ -615,9 +615,9 @@ async def test_mark_read_and_unread_count(client):
     Built from two friends so the assertions are about read state rather than
     about how many requests a single pair can have pending.
     """
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
-    c, cid = await _user(client, "c")
+    _c, cid = await _user(client, "c")
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": cid}, headers=a)
 
@@ -647,8 +647,8 @@ async def test_mark_read_is_idempotent(client):
 
 async def test_mark_all_read(client):
     a, aid = await _user(client, "a")
-    c, cid = await _user(client, "c")
-    d, did = await _user(client, "d")
+    c, _cid = await _user(client, "c")
+    d, _did = await _user(client, "d")
     # Two distinct actors, so the recipient genuinely holds two notifications.
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": aid}, headers=c)
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": aid}, headers=d)
@@ -666,7 +666,7 @@ async def test_mark_all_read(client):
 
 async def test_a_rider_cannot_read_another_riders_notification(client):
     """404, byte-identical to a guessed id — never an existence oracle."""
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     stranger, _ = await _user(client, "c")
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
@@ -681,14 +681,14 @@ async def test_a_rider_cannot_read_another_riders_notification(client):
 
 
 async def test_a_rider_cannot_list_another_riders_notifications(client):
-    a, aid = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    a, _aid = await _user(client, "a")
+    _b, bid = await _user(client, "b")
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
     assert (await _notifs(client, a))["total"] == 0
 
 
 async def test_unread_only_filter(client):
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": bid}, headers=a)
     item = (await _notifs(client, b))["items"][0]
@@ -710,9 +710,9 @@ async def test_pagination_envelope_and_cap(client):
     none of them may be the recipient.
     """
     a, aid = await _user(client, "a")
-    b, bid = await _user(client, "b")
-    c, cid = await _user(client, "c")
-    d, did = await _user(client, "d")
+    b, _bid = await _user(client, "b")
+    c, _cid = await _user(client, "c")
+    d, _did = await _user(client, "d")
     for actor in (b, c, d):
         sent = await client.post(f"{SOCIAL}/friend-requests", json={"user_id": aid}, headers=actor)
         assert sent.status_code == 201, f"{sent.status_code} for a distinct actor"
@@ -727,8 +727,8 @@ async def test_pagination_envelope_and_cap(client):
 
 async def test_notifications_are_newest_first(client):
     a, aid = await _user(client, "a")
-    c, cid = await _user(client, "c")
-    d, did = await _user(client, "d")
+    c, _cid = await _user(client, "c")
+    d, _did = await _user(client, "d")
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": aid}, headers=c)
     await client.post(f"{SOCIAL}/friend-requests", json={"user_id": aid}, headers=d)
     items = (await _notifs(client, a))["items"]
@@ -743,7 +743,7 @@ async def test_notifications_are_newest_first(client):
 
 async def test_no_notification_carries_private_content(client):
     """No message body, email, coordinate, or token in any notification."""
-    a, aid = await _user(client, "a")
+    a, _aid = await _user(client, "a")
     b, bid = await _user(client, "b")
     await _register_device(client, b, token=SECRET)
     dm = (await client.post(f"{CHAT}/direct", params={"target_user_id": bid}, headers=a)).json()
@@ -929,7 +929,7 @@ async def test_unauthenticated_requests_are_refused(client):
 
 
 async def test_openapi_exposes_the_notification_surface(client):
-    h, _ = await _user(client, "a")
+    _h, _ = await _user(client, "a")
     paths = (await client.get("/openapi.json")).json()["paths"]
     for expected in [
         f"{NOTIF}",

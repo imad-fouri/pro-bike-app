@@ -850,11 +850,11 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
       thread = container.read(conversationThreadProvider('c-1')).value!;
-      expect(
-        thread.messages.map((m) => m.seq),
-        [1, 2, 3],
-        reason: 'a merge duplicated or reordered the thread',
-      );
+      expect(thread.messages.map((m) => m.seq), [
+        1,
+        2,
+        3,
+      ], reason: 'a merge duplicated or reordered the thread');
       expect(thread.newestSeq, 3);
     });
 

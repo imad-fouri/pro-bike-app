@@ -260,9 +260,9 @@ async def test_a_block_refuses_reading_and_sending_but_retains_history(client, d
             .scalars()
             .all()
         )
-    assert stored == [
-        "hello before the block"
-    ], "a block must never delete message history (ADR-14 §2.4)"
+    assert stored == ["hello before the block"], (
+        "a block must never delete message history (ADR-14 §2.4)"
+    )
 
     # Unblocking restores the exact thread rather than leaving a gap.
     unblocked = await client.delete(f"{SOCIAL}/blocks/{aid}", headers=b)
@@ -326,7 +326,7 @@ def _headers(user_id: str) -> dict:
 async def test_a_direct_conversation_still_reports_its_peer(client):
     """The DM path is untouched: a DM has exactly one peer and must name it."""
     a, _ = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    _b, bid = await _user(client, "b")
     dm = await _dm(client, a, bid)
     body = (await client.get(f"{CHAT}/conversations/{dm['id']}", headers=a)).json()
     assert body["peer_user_id"] == bid
@@ -752,7 +752,7 @@ async def test_delete_is_idempotent(client):
 
 async def test_inbox_lists_only_the_viewers_conversations(client):
     a, _ = await _user(client, "a")
-    b, bid = await _user(client, "b")
+    _b, bid = await _user(client, "b")
     stranger, _ = await _user(client, "c")
     dm = await _dm(client, a, bid)
     await _send_ok(client, a, dm["id"], "hello")

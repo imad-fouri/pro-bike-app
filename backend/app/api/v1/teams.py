@@ -45,9 +45,7 @@ MAX_LIST = 100
 
 
 def _fail(exc: TeamError) -> HTTPException:
-    return HTTPException(
-        status_code=exc.status, detail={"code": exc.code, "message": exc.message}
-    )
+    return HTTPException(status_code=exc.status, detail={"code": exc.code, "message": exc.message})
 
 
 def _limited(key: str, limit: int, window_s: int) -> None:
@@ -72,9 +70,7 @@ async def create_team(
 ) -> TeamOut:
     _limited(f"team-create:{user.id}", 10, 3600)
     try:
-        team, role = await team_service.create_team(
-            db, user, body.model_dump(exclude_unset=True)
-        )
+        team, role = await team_service.create_team(db, user, body.model_dump(exclude_unset=True))
         view = await team_service.team_view(db, user, team, role)
     except TeamError as exc:
         raise _fail(exc) from exc
@@ -90,9 +86,7 @@ async def list_my_teams(
     page_size: int = Query(default=20, ge=1, le=MAX_LIST),
     include_archived: bool = False,
 ) -> TeamPage:
-    items, total = await team_service.list_my_teams(
-        db, user, page, page_size, include_archived
-    )
+    items, total = await team_service.list_my_teams(db, user, page, page_size, include_archived)
     return TeamPage(
         items=[_manager_out(v, None) for v in items],
         total=total,
@@ -149,9 +143,7 @@ async def my_invitations(
     page_size: int = Query(default=20, ge=1, le=MAX_LIST),
 ) -> InvitationPage:
     try:
-        items, total = await team_service.my_invitations(
-            db, user, status, page, page_size
-        )
+        items, total = await team_service.my_invitations(db, user, status, page, page_size)
     except TeamError as exc:
         raise _fail(exc) from exc
     return InvitationPage(
@@ -282,9 +274,7 @@ async def set_member_role(
 ) -> dict:
     _limited(f"team-member:{user.id}", 60, 3600)
     try:
-        row = await team_service.set_member_role(
-            db, user, team_id, user_id, TeamRole(role)
-        )
+        row = await team_service.set_member_role(db, user, team_id, user_id, TeamRole(role))
     except TeamError as exc:
         raise _fail(exc) from exc
     return {"user_id": str(row.user_id), "role": row.role.value}
@@ -347,9 +337,7 @@ async def list_join_requests(
     page_size: int = Query(default=20, ge=1, le=MAX_LIST),
 ) -> JoinRequestPage:
     try:
-        items, total = await team_service.list_join_requests(
-            db, user, team_id, page, page_size
-        )
+        items, total = await team_service.list_join_requests(db, user, team_id, page, page_size)
     except TeamError as exc:
         raise _fail(exc) from exc
     return JoinRequestPage(
@@ -416,9 +404,7 @@ async def invite_user(
 ) -> InvitationOut:
     _limited(f"team-invite:{user.id}", 60, 3600)
     try:
-        row = await team_service.invite_user(
-            db, user, team_id, body.user_id, body.message
-        )
+        row = await team_service.invite_user(db, user, team_id, body.user_id, body.message)
         view = await team_service._invitation_view(db, row)
     except TeamError as exc:
         raise _fail(exc) from exc
@@ -434,9 +420,7 @@ async def list_team_invitations(
     page_size: int = Query(default=20, ge=1, le=MAX_LIST),
 ) -> InvitationPage:
     try:
-        items, total = await team_service.list_team_invitations(
-            db, user, team_id, page, page_size
-        )
+        items, total = await team_service.list_team_invitations(db, user, team_id, page, page_size)
     except TeamError as exc:
         raise _fail(exc) from exc
     return InvitationPage(

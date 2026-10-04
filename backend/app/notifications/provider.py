@@ -132,10 +132,10 @@ async def deliver_with_retry(
     for attempt in range(settings.PUSH_RETRY_LIMIT + 1):
         try:
             return await provider.send(message, targets)
-        except PushTimeout as exc:
-            raise exc
-        except PushInvalidResponse as exc:
-            raise exc
+        except PushTimeout:
+            raise
+        except PushInvalidResponse:
+            raise
         except PushUnavailable as exc:
             last = exc
         if attempt < settings.PUSH_RETRY_LIMIT:
@@ -146,8 +146,8 @@ async def deliver_with_retry(
 __all__ = [
     "PushProvider",
     "UnconfiguredPushProvider",
+    "_status_error",
     "deliver_with_retry",
     "get_provider",
     "set_provider",
-    "_status_error",
 ]

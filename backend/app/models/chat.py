@@ -108,7 +108,7 @@ class Conversation(Base):
         Index("ix_conversations_team_id", "team_id"),
         Index("ix_conversations_created_at", "created_at"),
         CheckConstraint(
-            "(kind = 'team' AND team_id IS NOT NULL) OR " "(kind = 'direct' AND team_id IS NULL)",
+            "(kind = 'team' AND team_id IS NOT NULL) OR (kind = 'direct' AND team_id IS NULL)",
             name="ck_conversations_kind_team",
         ),
         CheckConstraint("next_seq >= 1", name="ck_conversations_next_seq"),

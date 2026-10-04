@@ -109,7 +109,7 @@ class Settings(BaseSettings):
         key = self.SECRET_KEY or ""
         if not key.strip():
             raise RuntimeError(
-                "SECRET_KEY is missing: set a unique production secret " f"({self._secret_policy})."
+                f"SECRET_KEY is missing: set a unique production secret ({self._secret_policy})."
             )
         if key == _DEV_SECRET_KEY:
             raise RuntimeError(
@@ -118,8 +118,7 @@ class Settings(BaseSettings):
             )
         if len(key) < _MIN_SECRET_LENGTH:
             raise RuntimeError(
-                "SECRET_KEY is too short: set a unique production secret "
-                f"({self._secret_policy})."
+                f"SECRET_KEY is too short: set a unique production secret ({self._secret_policy})."
             )
 
     @property

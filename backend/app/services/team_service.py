@@ -243,9 +243,10 @@ async def _visible_team(
     """
     team = await _team_row(db, team_id, include_archived=True)
     role = await _role_of(db, team_id, viewer.id)
-    if role is None:
-        if team.status != TeamStatus.ACTIVE or team.visibility != TeamVisibility.PUBLIC:
-            raise TeamError("TEAM_NOT_FOUND", "Team not found.", 404)
+    if role is None and (
+        team.status != TeamStatus.ACTIVE or team.visibility != TeamVisibility.PUBLIC
+    ):
+        raise TeamError("TEAM_NOT_FOUND", "Team not found.", 404)
     return team, role
 
 
