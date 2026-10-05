@@ -144,9 +144,7 @@ async def _participant_row(
     return res.scalar_one_or_none()
 
 
-async def _roster(
-    db: AsyncSession, ride_id: uuid.UUID
-) -> list[GroupRideParticipant]:
+async def _roster(db: AsyncSession, ride_id: uuid.UUID) -> list[GroupRideParticipant]:
     res = await db.execute(
         select(GroupRideParticipant)
         .where(GroupRideParticipant.group_ride_id == ride_id)
@@ -237,9 +235,7 @@ async def _joinable(db: AsyncSession, ride: GroupRide, user_id: uuid.UUID) -> No
     ):
         raise RideError("RIDE_BLOCKED", "You cannot join this ride.", 403)
     target = (
-        await db.execute(
-            select(User).where(User.id == user_id, User.deleted_at.is_(None))
-        )
+        await db.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if target is None or target.status != UserStatus.ACTIVE:
         raise RideError("RIDE_MEMBER_UNAVAILABLE", "That rider cannot be invited.", 400)
@@ -334,9 +330,7 @@ async def _ride_view(
                 "user_id": str(r.user_id),
                 "role": r.role.value,
                 "status": r.status.value,
-                "invited_by_user_id": (
-                    str(r.invited_by_user_id) if r.invited_by_user_id else None
-                ),
+                "invited_by_user_id": (str(r.invited_by_user_id) if r.invited_by_user_id else None),
                 "message": r.message,
                 "responded_at": r.responded_at.isoformat() if r.responded_at else None,
                 "created_at": r.created_at.isoformat(),

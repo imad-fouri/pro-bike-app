@@ -154,7 +154,9 @@ class GroupRide(Base):
             "(route_id IS NOT NULL AND route_version IS NOT NULL)",
             name="ck_group_rides_route_pin",
         ),
-        CheckConstraint("route_version IS NULL OR route_version >= 1", name="ck_group_rides_route_version"),
+        CheckConstraint(
+            "route_version IS NULL OR route_version >= 1", name="ck_group_rides_route_version"
+        ),
         CheckConstraint("length(title) > 0", name="ck_group_rides_title_nonempty"),
         # A terminal state must carry its timestamp. `completed` with a NULL
         # completed_at is not a fact a rider can rely on, and that kind of drift
@@ -251,7 +253,11 @@ class GroupRideParticipant(Base):
         nullable=False,
     )
     status: Mapped[GroupRideParticipantStatus] = mapped_column(
-        Enum(GroupRideParticipantStatus, name="group_ride_participant_status", values_callable=_values),
+        Enum(
+            GroupRideParticipantStatus,
+            name="group_ride_participant_status",
+            values_callable=_values,
+        ),
         nullable=False,
     )
     # NULL for the organizer's own row; set for every invitation.

@@ -71,6 +71,7 @@ LOCATION_TTL_SECONDS = 300
 #: "here now", and the client is told the age so it can grey the dot out.
 STALE_AFTER_SECONDS = 60
 
+
 #: Redis hash key for one ride's positions. The `gr9` prefix keeps this phase's
 #: keys namespaced from anything a previous phase wrote.
 def _key(ride_id: uuid.UUID) -> str:
@@ -99,9 +100,7 @@ async def _blocked_either_way(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> b
     return res.scalar_one_or_none() is not None
 
 
-async def _require_shareable(
-    db: AsyncSession, viewer: User, ride_id: uuid.UUID
-) -> GroupRide:
+async def _require_shareable(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> GroupRide:
     """Gate for both publish and read.
 
     A rider must be JOINED on a ride that is `open` or `started`. The same gate
@@ -157,7 +156,9 @@ async def publish(
         pipe.hset(
             key,
             mapping={
-                str(viewer.id): f"{latitude}|{longitude}|{accuracy_m if accuracy_m is not None else ''}|{stamp.timestamp()}",
+                str(
+                    viewer.id
+                ): f"{latitude}|{longitude}|{accuracy_m if accuracy_m is not None else ''}|{stamp.timestamp()}",
             },
         )
         pipe.expire(key, LOCATION_TTL_SECONDS)
@@ -203,9 +204,7 @@ async def stop_sharing(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> di
     return {"status": "stopped"}
 
 
-async def list_locations(
-    db: AsyncSession, viewer: User, ride_id: uuid.UUID
-) -> dict:
+async def list_locations(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> dict:
     """The riders currently sharing, as visible to THIS viewer.
 
     Filters, in this order: joined roster, not stale, not blocked either way. A

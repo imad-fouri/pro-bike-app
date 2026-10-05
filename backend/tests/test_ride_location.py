@@ -59,7 +59,10 @@ async def _user(client, tag="a"):
     assert me.status_code == 200, me.text
     await client.patch(
         f"{SOCIAL}/profile",
-        json={"username": f"loc_{tag}_{uuid.uuid4().hex[:6]}", "display_name": data["display_name"]},
+        json={
+            "username": f"loc_{tag}_{uuid.uuid4().hex[:6]}",
+            "display_name": data["display_name"],
+        },
         headers=headers,
     )
     return headers, me.json()["user_id"]
@@ -94,9 +97,7 @@ async def _started_ride(client):
         f"{RIDES}/{ride_id}/invitations", json={"user_id": guest_id}, headers=org_h
     )
     assert inv.status_code == 201, inv.text
-    joined = await client.post(
-        f"{RIDES}/{ride_id}/respond", json={"accept": True}, headers=guest_h
-    )
+    joined = await client.post(f"{RIDES}/{ride_id}/respond", json={"accept": True}, headers=guest_h)
     assert joined.status_code == 200, joined.text
     started = await client.post(f"{RIDES}/{ride_id}/start", headers=org_h)
     assert started.status_code == 200, started.text
@@ -416,9 +417,7 @@ async def test_an_organizer_removed_from_viewing_still_cannot_publish(client, cl
     org_h, _, guest_h, guest_id, ride_id = await _started_ride(client)
     clean_live_ride.append(uuid.UUID(ride_id))
 
-    removed = await client.delete(
-        f"{RIDES}/{ride_id}/participants/{guest_id}", headers=org_h
-    )
+    removed = await client.delete(f"{RIDES}/{ride_id}/participants/{guest_id}", headers=org_h)
     assert removed.status_code == 200, removed.text
 
     r = await client.post(
@@ -513,9 +512,7 @@ async def test_a_blocked_pair_cannot_see_each_others_position(client, clean_live
     org_h, org_id, guest_h, _, ride_id = await _started_ride(client)
     clean_live_ride.append(uuid.UUID(ride_id))
 
-    blocked = await client.post(
-        f"{SOCIAL}/blocks", json={"user_id": org_id}, headers=guest_h
-    )
+    blocked = await client.post(f"{SOCIAL}/blocks", json={"user_id": org_id}, headers=guest_h)
     assert blocked.status_code == 201, blocked.text
 
     await client.post(

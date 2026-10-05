@@ -55,7 +55,10 @@ async def _user(client, tag="a"):
     assert me.status_code == 200, me.text
     await client.patch(
         f"{SOCIAL}/profile",
-        json={"username": f"ride_{tag}_{uuid.uuid4().hex[:6]}", "display_name": data["display_name"]},
+        json={
+            "username": f"ride_{tag}_{uuid.uuid4().hex[:6]}",
+            "display_name": data["display_name"],
+        },
         headers=headers,
     )
     return headers, me.json()["user_id"]
@@ -400,9 +403,10 @@ async def test_decline_then_reinvite_resets_the_same_row(client):
         f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest_h
     )
     assert declined.status_code == 200, declined.text
-    assert next(r for r in declined.json()["roster"] if r["user_id"] == guest_id)[
-        "status"
-    ] == "declined"
+    assert (
+        next(r for r in declined.json()["roster"] if r["user_id"] == guest_id)["status"]
+        == "declined"
+    )
 
     reinvited = await _invite(client, org_h, ride["id"], guest_id, message="changed my mind")
     rows = [r for r in reinvited["roster"] if r["user_id"] == guest_id]
@@ -420,8 +424,12 @@ async def test_accepting_twice_is_idempotent(client):
     ride = await _ride(client, org_h)
     await _invite(client, org_h, ride["id"], guest_id)
 
-    first = await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest_h)
-    second = await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest_h)
+    first = await client.post(
+        f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest_h
+    )
+    second = await client.post(
+        f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest_h
+    )
     assert first.status_code == 200
     assert second.status_code == 200, second.text
     rows = [r for r in second.json()["roster"] if r["user_id"] == guest_id]
@@ -554,9 +562,7 @@ async def test_organizer_removes_a_rider_while_started(client):
     org_h, _, guest_h, guest_id, ride_id = await _ride_with_two(client)
     assert (await client.post(f"{RIDES}/{ride_id}/start", headers=org_h)).status_code == 200
 
-    removed = await client.delete(
-        f"{RIDES}/{ride_id}/participants/{guest_id}", headers=org_h
-    )
+    removed = await client.delete(f"{RIDES}/{ride_id}/participants/{guest_id}", headers=org_h)
     assert removed.status_code == 200, removed.text
     row = next(r for r in removed.json()["roster"] if r["user_id"] == guest_id)
     assert row["status"] == "removed"
@@ -661,9 +667,7 @@ async def test_non_organizer_cannot_manage_the_ride(client):
 async def test_organizer_cannot_invite_themselves(client):
     """Absorbed as a no-op by nobody: it is a confused client, worth saying."""
     org_h, org_id, _, _, ride_id = await _ride_with_two(client)
-    r = await client.post(
-        f"{RIDES}/{ride_id}/invitations", json={"user_id": org_id}, headers=org_h
-    )
+    r = await client.post(f"{RIDES}/{ride_id}/invitations", json={"user_id": org_id}, headers=org_h)
     assert r.status_code == 400, r.text
     assert r.json()["error"]["code"] == "RIDE_ALREADY_MEMBER"
 
@@ -687,13 +691,9 @@ async def test_only_the_invitee_may_answer(client):
         assert still_pending[0]["status"] == "invited", f"{who} resolved another rider"
 
     # The invitee themselves still can.
-    theirs = await client.post(
-        f"{RIDES}/{ride_id}/respond", json={"accept": True}, headers=third_h
-    )
+    theirs = await client.post(f"{RIDES}/{ride_id}/respond", json={"accept": True}, headers=third_h)
     assert theirs.status_code == 200, theirs.text
-    assert [x["status"] for x in theirs.json()["roster"] if x["user_id"] == third_id] == [
-        "joined"
-    ]
+    assert [x["status"] for x in theirs.json()["roster"] if x["user_id"] == third_id] == ["joined"]
     del org_id
 
 
@@ -768,9 +768,7 @@ async def test_blocked_pair_cannot_share_a_ride(client):
     # so it is the ORGANIZER's invitation of the guest that gets refused — which
     # is the direction that actually matters, since the organizer holds the only
     # power to put someone on a ride.
-    blocked = await client.post(
-        f"{SOCIAL}/blocks", json={"user_id": org_id}, headers=guest_h
-    )
+    blocked = await client.post(f"{SOCIAL}/blocks", json={"user_id": org_id}, headers=guest_h)
     assert blocked.status_code == 201, blocked.text
 
     refused = await client.post(
@@ -1015,8 +1013,12 @@ async def test_concurrent_invites_of_the_same_rider_create_one_row(client):
     ride = await _ride(client, org_h)
 
     results = await asyncio.gather(
-        client.post(f"{RIDES}/{ride['id']}/invitations", json={"user_id": target_id}, headers=org_h),
-        client.post(f"{RIDES}/{ride['id']}/invitations", json={"user_id": target_id}, headers=org_h),
+        client.post(
+            f"{RIDES}/{ride['id']}/invitations", json={"user_id": target_id}, headers=org_h
+        ),
+        client.post(
+            f"{RIDES}/{ride['id']}/invitations", json={"user_id": target_id}, headers=org_h
+        ),
         return_exceptions=True,
     )
     ok = [r for r in results if not isinstance(r, BaseException) and r.status_code == 201]
@@ -1178,9 +1180,7 @@ async def test_a_failing_start_notification_still_starts(client, monkeypatch):
     assert detail["status"] == "started"
 
 
-async def test_a_failing_invitation_notification_does_not_poison_the_next_one(
-    client, monkeypatch
-):
+async def test_a_failing_invitation_notification_does_not_poison_the_next_one(client, monkeypatch):
     """One rider's failed notification must not silence the next rider's.
 
     The isolation is per-hook-call, not per-ride. A handler that caught the

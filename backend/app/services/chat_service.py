@@ -284,9 +284,7 @@ async def _assert_can_send(db: AsyncSession, conversation: Conversation, viewer:
         # this re-reads the live roster row inside the lock.
         assert conversation.group_ride_id is not None  # guaranteed by CHECK
         ride = (
-            await db.execute(
-                select(GroupRide).where(GroupRide.id == conversation.group_ride_id)
-            )
+            await db.execute(select(GroupRide).where(GroupRide.id == conversation.group_ride_id))
         ).scalar_one_or_none()
         if ride is None:
             raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
@@ -454,8 +452,7 @@ async def list_conversations(
                     and_(
                         GroupRideParticipant.group_ride_id == Conversation.group_ride_id,
                         GroupRideParticipant.user_id == viewer.id,
-                        GroupRideParticipant.status
-                        == GroupRideParticipantStatus.JOINED,
+                        GroupRideParticipant.status == GroupRideParticipantStatus.JOINED,
                     )
                 ),
             ),
@@ -529,9 +526,7 @@ async def _teams_for(db: AsyncSession, team_ids: list[uuid.UUID]) -> dict[uuid.U
     return {t.id: t for t in res.scalars()}
 
 
-async def _rides_for(
-    db: AsyncSession, ride_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, GroupRide]:
+async def _rides_for(db: AsyncSession, ride_ids: list[uuid.UUID]) -> dict[uuid.UUID, GroupRide]:
     """Ride rows behind a page of inbox entries, in one round trip.
 
     Only `title` and `status` are ever read, but the whole row comes along: a
@@ -623,11 +618,7 @@ async def _conversation_view(
     is_direct = conversation.kind == ConversationKind.DIRECT
     peer = await _peer_of(db, conversation.id, viewer.id) if is_direct else None
     team = teams.get(conversation.team_id) if conversation.team_id else None
-    ride = (
-        rides.get(conversation.group_ride_id)
-        if conversation.group_ride_id
-        else None
-    )
+    ride = rides.get(conversation.group_ride_id) if conversation.group_ride_id else None
     who = identities.get(peer, {}) if peer else {}
     return {
         "id": conversation.id,
@@ -853,9 +844,7 @@ async def _open_team_channel(db: AsyncSession, viewer: User, team: Team) -> dict
     )
 
 
-async def group_ride_conversation(
-    db: AsyncSession, viewer: User, ride_id: uuid.UUID
-) -> dict:
+async def group_ride_conversation(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> dict:
     """The ride's single channel, created on first open (ADR-16 §5).
 
     Standing is re-derived from a JOINED roster row, so an ex-participant asking
@@ -914,9 +903,7 @@ async def _open_ride_channel(db: AsyncSession, viewer: User, ride: GroupRide) ->
             ).scalar_one()
             if await _member_row(db, row.id, viewer.id) is None:
                 db.add(
-                    ConversationMember(
-                        conversation_id=row.id, user_id=viewer.id, joined_at=_now()
-                    )
+                    ConversationMember(conversation_id=row.id, user_id=viewer.id, joined_at=_now())
                 )
                 await db.commit()
         await db.refresh(row)

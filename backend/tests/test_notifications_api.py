@@ -1026,7 +1026,9 @@ async def _ride(client, headers, title="Sunday Spin"):
 
 
 async def _invite(client, headers, ride_id, user_id):
-    r = await client.post(f"{RIDES}/{ride_id}/invitations", json={"user_id": user_id}, headers=headers)
+    r = await client.post(
+        f"{RIDES}/{ride_id}/invitations", json={"user_id": user_id}, headers=headers
+    )
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -1060,9 +1062,7 @@ async def test_an_acceptance_notifies_the_organizer(client):
     ride = await _ride(client, org)
     await _invite(client, org, ride["id"], guest_id)
     assert (
-        await client.post(
-            f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest
-        )
+        await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
     ).status_code == 200
 
     theirs = await _of_type(client, org, "group_ride_accepted")
@@ -1077,9 +1077,7 @@ async def test_a_decline_notifies_nobody(client):
     ride = await _ride(client, org)
     await _invite(client, org, ride["id"], guest_id)
     assert (
-        await client.post(
-            f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest
-        )
+        await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest)
     ).status_code == 200
 
     assert await _of_type(client, org, "group_ride_accepted") == []
@@ -1132,9 +1130,7 @@ async def test_a_reinvitation_after_a_decline_reaches_the_rider(client):
     ride = await _ride(client, org)
     await _invite(client, org, ride["id"], guest_id)
     assert (
-        await client.post(
-            f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest
-        )
+        await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest)
     ).status_code == 200
     assert len(await _of_type(client, guest, "group_ride_invitation")) == 1
 
@@ -1194,9 +1190,7 @@ async def test_a_rider_removed_before_a_message_is_not_notified(client):
     await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
     channel = await client.get(f"{RIDES}/{ride['id']}/conversation", headers=org)
 
-    removed = await client.delete(
-        f"{RIDES}/{ride['id']}/participants/{guest_id}", headers=org
-    )
+    removed = await client.delete(f"{RIDES}/{ride['id']}/participants/{guest_id}", headers=org)
     assert removed.status_code == 200, removed.text
 
     # The organizer is still on the ride and can still post — their own

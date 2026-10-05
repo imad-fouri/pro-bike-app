@@ -383,7 +383,9 @@ async def notify_group_ride_accepted(
     Not a fan-out: the organizer already knows who they invited, and telling the
     whole roster who just joined turns the roster into a roster.
     """
-    ride = (await db.execute(select(GroupRide).where(GroupRide.id == group_ride_id))).scalar_one_or_none()
+    ride = (
+        await db.execute(select(GroupRide).where(GroupRide.id == group_ride_id))
+    ).scalar_one_or_none()
     if ride is None:
         return []
     params = await _actor_params(db, actor_id)
