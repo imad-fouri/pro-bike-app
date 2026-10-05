@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../group_rides/domain/group_ride.dart' show GroupRideStatus;
 import '../../social/presentation/social_widgets.dart';
 import '../domain/chat.dart';
 import '../domain/chat_validators.dart';
@@ -27,10 +28,29 @@ class ConversationScreen extends ConsumerStatefulWidget {
   final String conversationId;
   final String title;
 
+  /// Whether this channel can no longer accept messages.
+  ///
+  /// Set by callers that already hold the authoritative status — the inbox row
+  /// carries `group_ride_status`, and the ride page has just loaded the ride.
+  /// Left null/false for a cold deep link, where the status was never fetched.
+  ///
+  /// This is a HINT, never an authorization: `_assert_can_send` re-reads the ride
+  /// status inside the conversation lock, so a client that guesses wrong is
+  /// rejected, not obeyed. That is why the flag defaults to false rather than
+  /// being inferred from the title.
+  final bool readOnly;
+
+  /// Why the channel is read-only, for the banner. Null means "no reason to
+  /// give", which is the cold-deep-link case — there we simply show the composer
+  /// and let the server speak.
+  final GroupRideStatus? closedBecauseRideStatus;
+
   const ConversationScreen({
     super.key,
     required this.conversationId,
     required this.title,
+    this.readOnly = false,
+    this.closedBecauseRideStatus,
   });
 
   @override
@@ -211,8 +231,59 @@ class _ConversationScreenState extends ConsumerState<ConversationScreen> {
               data: (data) => _history(data),
             ),
           ),
-          _composer(),
+          if (widget.readOnly) _readOnlyBanner() else _composer(),
         ],
+      ),
+    );
+  }
+
+  /// Explains an absent composer.
+  ///
+  /// A closed channel with no explanation reads as a broken app: the rider taps
+  /// send, nothing is there, and they cannot tell whether the app failed or the
+  /// ride ended. The reason is named so the absence reads as a decision.
+  ///
+  /// `cancelled` and `completed` get distinct sentences because they are
+  /// different facts — one ride was called off, the other happened — and
+  /// collapsing them would tell a rider their ride "is no longer active" when it
+  /// in fact ran.
+  Widget _readOnlyBanner() {
+    final t = context.l10n;
+    final status = widget.closedBecauseRideStatus;
+    final key = switch (status) {
+      GroupRideStatus.cancelled => 'chat.rideCancelled',
+      GroupRideStatus.completed => 'chat.rideCompleted',
+      _ => 'chat.rideClosed',
+    };
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.surface2)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.lock_outline_rounded,
+              size: 18,
+              color: AppColors.textMuted,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                t.get(key),
+                key: const Key('chat.readOnly'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

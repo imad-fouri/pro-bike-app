@@ -31,6 +31,7 @@ SOCIAL = "/api/v1/social"
 TEAMS = "/api/v1/teams"
 CHAT = "/api/v1/chat"
 AUTH = "/api/v1/auth"
+RIDES = "/api/v1/group-rides"
 
 SECRET = "SUPER-SECRET-PUSH-TOKEN-XYZ"
 
@@ -1011,3 +1012,212 @@ async def test_concurrent_mark_read_is_idempotent(client):
     assert inbox["items"][0]["is_unread"] is False
     assert (await client.get(f"{NOTIF}/unread-count", headers=b)).json()["unread_count"] == 0
     assert aid
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — group rides (ADR-16 §7)
+# ---------------------------------------------------------------------------
+
+
+async def _ride(client, headers, title="Sunday Spin"):
+    r = await client.post(f"{RIDES}", json={"title": title}, headers=headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def _invite(client, headers, ride_id, user_id):
+    r = await client.post(f"{RIDES}/{ride_id}/invitations", json={"user_id": user_id}, headers=headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def _of_type(client, headers, type_):
+    return [i for i in (await _notifs(client, headers))["items"] if i["type"] == type_]
+
+
+async def test_an_invitation_notifies_only_the_invitee(client):
+    """An invitation is addressed to one rider. The rest of the ride has no business
+    hearing about it, and the organizer certainly does not notify themselves."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    other, other_id = await _user(client, "c")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await _invite(client, org, ride["id"], other_id)
+
+    mine = await _of_type(client, guest, "group_ride_invitation")
+    assert len(mine) == 1, mine
+    assert mine[0]["deep_link"] == f"/group-rides/{ride['id']}"
+    assert mine[0]["params"]["groupRideTitle"] == "Sunday Spin"
+    assert await _of_type(client, org, "group_ride_invitation") == []
+    assert len(await _of_type(client, other, "group_ride_invitation")) == 1
+
+
+async def test_an_acceptance_notifies_the_organizer(client):
+    """The organizer is the one who needs to know the ride is happening."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    assert (
+        await client.post(
+            f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest
+        )
+    ).status_code == 200
+
+    theirs = await _of_type(client, org, "group_ride_accepted")
+    assert len(theirs) == 1, theirs
+    assert await _of_type(client, guest, "group_ride_accepted") == []
+
+
+async def test_a_decline_notifies_nobody(client):
+    """A decline is a private decision, not an event anybody is waiting on."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    assert (
+        await client.post(
+            f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest
+        )
+    ).status_code == 200
+
+    assert await _of_type(client, org, "group_ride_accepted") == []
+    assert await _of_type(client, guest, "group_ride_accepted") == []
+
+
+async def test_starting_tells_every_joined_rider_but_not_the_organizer(client):
+    """The organizer's own tap is not news to the organizer."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
+    assert (await client.post(f"{RIDES}/{ride['id']}/start", headers=org)).status_code == 200
+
+    theirs = await _of_type(client, guest, "group_ride_started")
+    assert len(theirs) == 1, theirs
+    assert await _of_type(client, org, "group_ride_started") == []
+
+
+async def test_a_rider_who_withdrew_is_not_told_the_ride_started(client):
+    """Someone who said they were not coming should not be summoned by a push
+    notification afterwards."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    staying, staying_id = await _user(client, "c")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await _invite(client, org, ride["id"], staying_id)
+    for headers in (guest, staying):
+        await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=headers)
+    assert (await client.post(f"{RIDES}/{ride['id']}/leave", headers=guest)).status_code == 200
+    assert (await client.post(f"{RIDES}/{ride['id']}/start", headers=org)).status_code == 200
+
+    assert await _of_type(client, guest, "group_ride_started") == []
+    assert len(await _of_type(client, staying, "group_ride_started")) == 1
+
+
+async def test_a_reinvitation_after_a_decline_reaches_the_rider(client):
+    """The regression test for a real bug.
+
+    `uq_group_ride_participants_pair` makes the roster row's id stable for the
+    life of the ride, so a dedupe key built from it alone made the SECOND
+    invitation a silent duplicate of the first. The rider was re-invited, the
+    organizer saw "invited", and no notification ever arrived — which for the
+    rider is indistinguishable from having been ignored.
+    """
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    assert (
+        await client.post(
+            f"{RIDES}/{ride['id']}/respond", json={"accept": False}, headers=guest
+        )
+    ).status_code == 200
+    assert len(await _of_type(client, guest, "group_ride_invitation")) == 1
+
+    await _invite(client, org, ride["id"], guest_id)
+    assert len(await _of_type(client, guest, "group_ride_invitation")) == 2
+
+
+async def test_reinviting_a_rider_who_already_joined_notifies_nobody(client):
+    """The roster row is already `joined`, so there is no new invitation — the
+    organizer is re-sending a request to somebody who is already on the ride."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
+
+    again = await client.post(
+        f"{RIDES}/{ride['id']}/invitations", json={"user_id": guest_id}, headers=org
+    )
+    assert again.status_code == 201, again.text
+    assert len(await _of_type(client, guest, "group_ride_invitation")) == 1
+
+
+async def test_a_ride_message_notifies_the_joined_roster_only(client):
+    """Its own notification type, because the recipient rule is its own: joined
+    roster, not team members, not block-cleared pairs."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    outsider, _ = await _user(client, "c")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
+
+    channel = await client.get(f"{RIDES}/{ride['id']}/conversation", headers=org)
+    assert channel.status_code == 200, channel.text
+    sent = await client.post(
+        f"{CHAT}/conversations/{channel.json()['id']}/messages",
+        json={"body": "Rolling out in five", "client_message_id": str(uuid.uuid4())},
+        headers=org,
+    )
+    assert sent.status_code == 201, sent.text
+
+    theirs = await _of_type(client, guest, "chat_message_group_ride")
+    assert len(theirs) == 1, theirs
+    assert await _of_type(client, org, "chat_message_group_ride") == []
+    assert await _of_type(client, outsider, "chat_message_group_ride") == []
+    # Not delivered under the generic chat type either: one type, one rule.
+    assert await _of_type(client, guest, "chat_message") == []
+
+
+async def test_a_rider_removed_before_a_message_is_not_notified(client):
+    """Removal takes effect at once, and a notification is a sighting too."""
+    org, _ = await _user(client, "a")
+    guest, guest_id = await _user(client, "b")
+    ride = await _ride(client, org)
+    await _invite(client, org, ride["id"], guest_id)
+    await client.post(f"{RIDES}/{ride['id']}/respond", json={"accept": True}, headers=guest)
+    channel = await client.get(f"{RIDES}/{ride['id']}/conversation", headers=org)
+
+    removed = await client.delete(
+        f"{RIDES}/{ride['id']}/participants/{guest_id}", headers=org
+    )
+    assert removed.status_code == 200, removed.text
+
+    # The organizer is still on the ride and can still post — their own
+    # membership is unaffected by somebody else's removal.
+    still_posted = await client.post(
+        f"{CHAT}/conversations/{channel.json()['id']}/messages",
+        json={"body": "Anyone still out there?", "client_message_id": str(uuid.uuid4())},
+        headers=org,
+    )
+    assert still_posted.status_code == 201, still_posted.text
+
+    # The removed rider is not a recipient, and cannot speak for themselves
+    # either: the channel is authorized by the live roster, not by the fact that
+    # they are still listed as a conversation member (ADR-16 §5).
+    refused = await client.post(
+        f"{CHAT}/conversations/{channel.json()['id']}/messages",
+        json={"body": "Let me in", "client_message_id": str(uuid.uuid4())},
+        headers=guest,
+    )
+    # 404, not 403: the removed rider must not be able to learn that the channel
+    # exists, only that they cannot reach it.
+    assert refused.status_code == 404, refused.text
+    assert refused.json()["error"]["code"] == "CHAT_CONVERSATION_NOT_FOUND"
+    assert await _of_type(client, guest, "chat_message_group_ride") == []

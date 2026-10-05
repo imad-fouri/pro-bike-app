@@ -72,6 +72,16 @@ IconData notificationIcon(NotificationType type) => switch (type) {
   NotificationType.teamArchived => Icons.archive_rounded,
   NotificationType.chatMessage => Icons.chat_bubble_rounded,
   NotificationType.chatMessageTeam => Icons.forum_rounded,
+
+  // Phase 9. The three RIDE events share one icon on purpose: they are three
+  // states of a single thing, and giving each a distinct glyph would imply they
+  // are three different things to act on. `directions_bike` is also the icon the
+  // ride list and chat inbox use, so the row reads as "ride" before the title.
+  NotificationType.groupRideInvitation ||
+  NotificationType.groupRideAccepted ||
+  NotificationType.groupRideStarted => Icons.directions_bike_rounded,
+  NotificationType.chatMessageGroupRide => Icons.forum_rounded,
+
   NotificationType.system => Icons.info_outline_rounded,
 };
 

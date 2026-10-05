@@ -12,6 +12,10 @@ import '../../features/bikes/presentation/bike_form_page.dart';
 import '../../features/bikes/presentation/bike_list_page.dart';
 import '../../features/chat/presentation/chat_inbox_page.dart';
 import '../../features/chat/presentation/conversation_page.dart';
+import '../../features/group_rides/domain/group_ride.dart';
+import '../../features/group_rides/presentation/group_ride_detail_page.dart';
+import '../../features/group_rides/presentation/group_ride_form_page.dart';
+import '../../features/group_rides/presentation/group_rides_page.dart';
 import '../../features/coach/presentation/coach_page.dart';
 import '../../features/notifications/presentation/notification_center_page.dart';
 import '../../features/notifications/presentation/notification_settings_page.dart';
@@ -220,14 +224,42 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/chat', builder: (c, s) => const ChatInboxPage()),
       GoRoute(
         path: '/chat/:id',
-        builder: (c, s) => ConversationScreen(
-          conversationId: s.pathParameters['id']!,
-          title: s.uri.queryParameters['name'] ?? '',
-        ),
+        builder: (c, s) {
+          // Absent vs. present matters: a notification deep link carries no
+          // `rideStatus`, and inventing one would claim the server had told us
+          // the status when it never did. Unknown leaves the composer up and lets
+          // the server be the authority.
+          final rideStatus = s.uri.queryParameters['rideStatus'];
+          return ConversationScreen(
+            conversationId: s.pathParameters['id']!,
+            title: s.uri.queryParameters['name'] ?? '',
+            closedBecauseRideStatus: rideStatus == null
+                ? null
+                : GroupRideStatus.parse(rideStatus),
+            readOnly:
+                rideStatus != null &&
+                GroupRideStatus.parse(rideStatus).isTerminal,
+          );
+        },
       ),
-      // '/group-rides' STAYS a placeholder: synchronized rides are explicitly
-      // out of scope for Phase 8.3.
-      for (final p in ['/rides', '/performance', '/group-rides', '/settings'])
+      // Phase 9: group rides. '/group-rides' leaves the placeholder loop below.
+      //
+      // Three routes, and the nesting is deliberate: `/group-rides/new` is
+      // registered BEFORE `/group-rides/:id` so "new" can never be read as a ride
+      // id. The order is load-bearing in go_router — reversing it makes the create
+      // form unreachable, which is exactly the kind of bug a router test catches
+      // and a manual click-through might not.
+      GoRoute(path: '/group-rides', builder: (c, s) => const GroupRidesPage()),
+      GoRoute(
+        path: '/group-rides/new',
+        builder: (c, s) => const GroupRideFormPage(),
+      ),
+      GoRoute(
+        path: '/group-rides/:id',
+        builder: (c, s) => GroupRideDetailPage(rideId: s.pathParameters['id']!),
+      ),
+
+      for (final p in ['/rides', '/performance', '/settings'])
         GoRoute(
           path: p,
           builder: (c, s) => PlaceholderPage(title: p),

@@ -486,7 +486,7 @@ async def scenario(client: httpx.AsyncClient, run: int) -> None:
     check(
         "    a message carries public identity only",
         {"sender_username", "sender_display_name"} <= set(message) and "email" not in message,
-        sorted(message.keys()),
+        str(sorted(message.keys())),
     )
 
     # --- rate limiting --------------------------------------------------------

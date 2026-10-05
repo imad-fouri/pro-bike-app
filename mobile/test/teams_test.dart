@@ -936,12 +936,18 @@ void main() {
       }
       expect(source.contains('const MyTeamsPage()'), isTrue);
 
-      // /groups must remain a placeholder: group rides are out of scope.
+      // Neither `/groups` nor `/group-rides` may remain a placeholder: Phase 9
+      // replaced the latter with the real list, form and detail routes. The
+      // `/group-rides` assertion used to require the opposite.
       final placeholderBlock = source.substring(
         source.indexOf('for (final p in ['),
       );
       expect(placeholderBlock.contains("'/groups'"), isFalse);
-      expect(placeholderBlock.contains("'/group-rides'"), isTrue);
+      expect(
+        placeholderBlock.contains("'/group-rides'"),
+        isFalse,
+        reason: '/group-rides is a real route since Phase 9',
+      );
       expect(
         placeholderBlock.contains("'/teams'"),
         isFalse,

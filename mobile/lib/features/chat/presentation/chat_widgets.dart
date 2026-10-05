@@ -33,6 +33,13 @@ String friendlyChatError(AppLocalizations t, Object error) {
       return t.get('chat.error.teamArchived');
     case 'CHAT_TEAM_UNAVAILABLE':
       return t.get('chat.error.teamUnavailable');
+    // Phase 9. Reached when a rider composes into a terminal ride channel — a
+    // cold deep link where no status was known, or a ride that ended while the
+    // screen was open. It gets its own sentence rather than a generic failure:
+    // the rider did nothing wrong, the ride simply finished, and "this ride is
+    // no longer active" is the fact they need.
+    case 'CHAT_GROUP_RIDE_CLOSED':
+      return t.get('chat.error.rideClosed');
     case 'CHAT_FORBIDDEN':
       return t.get('chat.error.forbidden');
     case 'CHAT_CANNOT_TARGET_SELF':
@@ -271,6 +278,10 @@ class ConversationTile extends StatelessWidget {
       child: ListTile(
         key: Key('chat.tile.${conversation.id}'),
         onTap: onTap,
+        // A ride channel is multi-party, so it is grouped with teams by the
+        // [isGroup] icon rather than given a single rider's avatar. The avatar is
+        // an initial badge for every kind here — the inbox deliberately does not
+        // fetch per-row images — so there is nothing else to distinguish.
         leading: conversation.isTeam
             ? TeamAvatar(avatarUrl: null, name: name, radius: 24)
             : SocialAvatar(avatarUrl: null, name: name, radius: 24),
@@ -284,10 +295,12 @@ class ConversationTile extends StatelessWidget {
                 ),
               ),
             ),
-            if (conversation.isTeam) ...[
+            if (conversation.isGroup) ...[
               const SizedBox(width: AppSpacing.xs),
-              const Icon(
-                Icons.groups_rounded,
+              Icon(
+                conversation.isGroupRide
+                    ? Icons.directions_bike_rounded
+                    : Icons.groups_rounded,
                 size: 14,
                 color: AppColors.textMuted,
               ),

@@ -99,7 +99,7 @@ class HomePage extends ConsumerWidget {
           const SizedBox(height: AppSpacing.sm),
           _NextEventCard(
             meta: t.get('home.eventMeta'),
-            onTap: () => context.go('/routes'),
+            onTap: () => context.go('/group-rides'),
           ),
           const SizedBox(height: AppSpacing.lg),
           FilledButton.icon(
@@ -381,6 +381,10 @@ class _NextEventCard extends StatelessWidget {
     final t = context.l10n;
     return Card(
       child: InkWell(
+        // Phase 9: the "next event" of a cycling app is a scheduled group ride.
+        // It pointed at `/routes`, which is not an event at all - a route is a
+        // path, and routes already have their own tab and profile entry.
+        key: const Key('home.nextEvent'),
         borderRadius: BorderRadius.circular(AppRadius.card),
         onTap: onTap,
         child: Padding(

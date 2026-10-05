@@ -9,9 +9,11 @@ duplicate all of it.
 Three load-bearing decisions:
 
 1. ONE CHANNEL PER TEAM (ADR-14 §3). A partial unique index on `team_id` WHERE
-   kind='team' makes a second channel for the same team impossible. Custom
-   channels are deferred to the group-ride phase, which is where ride-specific
-   conversations actually become necessary.
+   kind='team' makes a second channel for the same team impossible. A
+   `group_ride` channel arrived in Phase 9 (ADR-16 §5) with the same
+   one-per-ride guarantee; its index is a plain UNIQUE on `group_ride_id`
+   because a partial predicate would have to name an enum value added in the
+   same migration, which PostgreSQL refuses to use.
 
 2. `seq` IS THE ORDER (ADR-14 §5). Messages are ordered and paged by
    `conversation_id, seq`, never by `created_at`, which concurrent sends can
@@ -47,10 +49,20 @@ from app.models.user import _uuid, _values
 
 
 class ConversationKind(str, enum.Enum):
-    """`team` = the single channel of a team; `direct` = a rider pair."""
+    """`team` = a team's channel; `direct` = a rider pair; `group_ride` = a
+    ride's channel (ADR-16 §5).
+
+    The third kind exists because a ride needs a conversation that is scoped to
+    the ROSTER rather than to a team. A team channel is authorized by live team
+    membership, which is the wrong authority for a ride: a rider removed from a
+    team keeps their conversation_members row so history stays attributable, and
+    reusing team channels would make that retained row wrongly keep granting
+    access. A ride channel re-resolves a `joined` roster row instead.
+    """
 
     TEAM = "team"
     DIRECT = "direct"
+    GROUP_RIDE = "group_ride"
 
 
 class MessageType(str, enum.Enum):
@@ -83,10 +95,15 @@ class Conversation(Base):
         Enum(ConversationKind, name="conversation_kind", values_callable=_values),
         nullable=False,
     )
-    # Set for kind='team', NULL for kind='direct'. Enforced by the CHECK below,
-    # so a direct conversation can never be bound to a team and vice versa.
+    # Set for kind='team', NULL otherwise. Enforced by the CHECK below, so a
+    # direct conversation can never be bound to a team and vice versa.
     team_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE")
+    )
+    # Set for kind='group_ride' (ADR-16 §5), NULL otherwise. The CHECK makes the
+    # binding exactly one of a team or a ride, never both and never neither.
+    group_ride_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("group_rides.id", ondelete="CASCADE")
     )
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -106,10 +123,22 @@ class Conversation(Base):
             postgresql_where=text("kind = 'team'"),
         ),
         Index("ix_conversations_team_id", "team_id"),
+        # Exactly one channel per ride (ADR-16 §5). Deliberately NOT a partial
+        # index like the team one above: a `WHERE kind = 'group_ride'` predicate
+        # would name an enum value added in the same migration as this table's
+        # column, which PostgreSQL refuses to use, and the `kind::text` workaround
+        # that works in a CHECK is rejected in an index because enum-to-text is
+        # STABLE, not IMMUTABLE. A plain UNIQUE on the nullable column is exactly
+        # as strong — unique indexes treat NULLs as distinct, so team and direct
+        # conversations coexist — and doubles as the lookup path for per-ride
+        # authorization.
+        Index("uq_conversations_group_ride_channel", "group_ride_id", unique=True),
         Index("ix_conversations_created_at", "created_at"),
         CheckConstraint(
-            "(kind = 'team' AND team_id IS NOT NULL) OR (kind = 'direct' AND team_id IS NULL)",
-            name="ck_conversations_kind_team",
+            "(kind = 'team' AND team_id IS NOT NULL AND group_ride_id IS NULL) OR "
+            "(kind = 'direct' AND team_id IS NULL AND group_ride_id IS NULL) OR "
+            "(kind = 'group_ride' AND team_id IS NULL AND group_ride_id IS NOT NULL)",
+            name="ck_conversations_kind_binding",
         ),
         CheckConstraint("next_seq >= 1", name="ck_conversations_next_seq"),
     )

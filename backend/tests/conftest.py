@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # Import models so metadata is complete.
-import app.models
+import app.models  # noqa: F401  (register tables in metadata)
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import create_app
@@ -51,7 +51,7 @@ def _test_db_ready():
 
 
 @pytest.fixture
-async def client(app, _test_db_ready):
+async def client(test_app, _test_db_ready):
     engine = create_async_engine(TEST_DATABASE_URL)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -59,10 +59,10 @@ async def client(app, _test_db_ready):
         async with factory() as session:
             yield session
 
-    app.dependency_overrides[get_db] = _override
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    test_app.dependency_overrides[get_db] = _override
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as c:
         yield c
-    app.dependency_overrides.clear()
+    test_app.dependency_overrides.clear()
     async with engine.begin() as conn:
         await conn.execute(text("TRUNCATE users CASCADE"))
     await engine.dispose()
@@ -92,7 +92,7 @@ def _clear_rate_limits():
 
 
 @pytest.fixture
-def app():
+def test_app():
     return create_app()
 
 

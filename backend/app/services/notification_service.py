@@ -29,6 +29,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import redact
 from app.models.chat import ConversationKind, ConversationMember
+from app.models.group_ride import (
+    GroupRide,
+    GroupRideParticipant,
+    GroupRideParticipantStatus,
+)
 from app.models.notifications import (
     Notification,
     NotificationType,
@@ -117,6 +122,23 @@ async def _live_team_members(db: AsyncSession, team_id: uuid.UUID) -> list[uuid.
     return list(res.scalars())
 
 
+async def _joined_in_ride(db: AsyncSession, ride_id: uuid.UUID) -> list[uuid.UUID]:
+    """Riders currently ON a ride.
+
+    Deliberately NOT `conversation_members`, and deliberately only `joined`: a
+    rider who withdrew or was removed keeps their chat roster row so history
+    stays attributable, and an `invited` rider has not accepted yet. Either would
+    make the roster wrongly keep notifying them (ADR-16 §5, §7).
+    """
+    res = await db.execute(
+        select(GroupRideParticipant.user_id).where(
+            GroupRideParticipant.group_ride_id == ride_id,
+            GroupRideParticipant.status == GroupRideParticipantStatus.JOINED,
+        )
+    )
+    return list(res.scalars())
+
+
 async def _dm_recipients(
     db: AsyncSession, conversation_id: uuid.UUID, sender_id: uuid.UUID
 ) -> list[uuid.UUID]:
@@ -165,6 +187,7 @@ async def notify_chat_message(
     conversation_id: uuid.UUID,
     kind: ConversationKind,
     team_id: uuid.UUID | None,
+    group_ride_id: uuid.UUID | None = None,
     message_id: uuid.UUID,
     sender_id: uuid.UUID,
 ) -> list[Notification]:
@@ -197,9 +220,19 @@ async def notify_chat_message(
         if team_name:
             params["teamName"] = team_name
 
+    if kind == ConversationKind.GROUP_RIDE and group_ride_id is not None:
+        # The RIDE TITLE, not the channel: a rider who gets three notifications
+        # in one ride should be able to tell which ride each belongs to, and a
+        # ride has no team to borrow a name from.
+        ride = (
+            await db.execute(select(GroupRide).where(GroupRide.id == group_ride_id))
+        ).scalar_one_or_none()
+        if ride is not None:
+            params["groupRideTitle"] = ride.title
+
     if is_team:
-        # Guaranteed NOT NULL by `ck_conversations_kind_team`, but the ORM type
-        # is nullable, so narrow it here rather than casting.
+        # Guaranteed NOT NULL by the binding CHECK, but the ORM type is
+        # nullable, so narrow it here rather than casting.
         if team_id is None:  # pragma: no cover — the CHECK prevents it
             return []
         recipients = [uid for uid in await _live_team_members(db, team_id) if uid != sender_id]
@@ -207,6 +240,15 @@ async def notify_chat_message(
         # No block filter: Phase 8.3 keeps a team channel open across a block,
         # and filtering push while leaving messages flowing would make the
         # channel a block detector.
+    elif kind == ConversationKind.GROUP_RIDE:
+        # A third recipient basis (ADR-16 §5). Same no-block-filter reasoning as a
+        # team channel, and for a stronger reason: a block is a personal
+        # boundary, and suppressing one rider's push inside a ride channel would
+        # tell the rest of the ride that something was wrong.
+        if group_ride_id is None:  # pragma: no cover — the CHECK prevents it
+            return []
+        recipients = [uid for uid in await _joined_in_ride(db, group_ride_id) if uid != sender_id]
+        type_ = NotificationType.CHAT_MESSAGE_GROUP_RIDE
     else:
         recipients = await _dm_recipients(db, conversation_id, sender_id)
         type_ = NotificationType.CHAT_MESSAGE
@@ -291,6 +333,106 @@ async def notify_team_invitation(
         params=params,
         deep_link=f"/teams/{team_id}",
         dedupe_key=f"team_invitation:{invitation_id}",
+    )
+
+
+async def notify_group_ride_invitation(
+    db: AsyncSession,
+    *,
+    actor_id: uuid.UUID,
+    group_ride_id: uuid.UUID,
+    title: str,
+    invitee_id: uuid.UUID,
+    participant_id: uuid.UUID,
+    invitation_key: str,
+) -> list[Notification]:
+    """Tell one invited rider. Never fan out to the ride.
+
+    `uq_group_ride_participants_pair` means the roster row's id is STABLE for the
+    life of the ride, so keying dedupe on it alone would make every re-invitation
+    a silent duplicate of the first one — the rider would be re-invited and never
+    told, which is worse than not re-inviting at all. `invitation_key` carries the
+    timestamp this particular invitation stamped on the row, so a genuine
+    re-invite is a new event while a retried request reuses the same key
+    (ADR-16 §7).
+    """
+    params = await _actor_params(db, actor_id)
+    params["groupRideTitle"] = title
+    return await notify(
+        db,
+        recipient_ids=[invitee_id],
+        type_=NotificationType.GROUP_RIDE_INVITATION,
+        actor_id=actor_id,
+        entity_type="group_ride",
+        entity_id=group_ride_id,
+        params=params,
+        deep_link=f"/group-rides/{group_ride_id}",
+        dedupe_key=f"group_ride_invitation:{participant_id}:{invitation_key}",
+    )
+
+
+async def notify_group_ride_accepted(
+    db: AsyncSession,
+    *,
+    actor_id: uuid.UUID,
+    group_ride_id: uuid.UUID,
+    title: str,
+) -> list[Notification]:
+    """Tell the ORGANIZER that a rider accepted. Exactly one recipient.
+
+    Not a fan-out: the organizer already knows who they invited, and telling the
+    whole roster who just joined turns the roster into a roster.
+    """
+    ride = (await db.execute(select(GroupRide).where(GroupRide.id == group_ride_id))).scalar_one_or_none()
+    if ride is None:
+        return []
+    params = await _actor_params(db, actor_id)
+    params["groupRideTitle"] = title
+    return await notify(
+        db,
+        recipient_ids=[ride.organizer_user_id],
+        type_=NotificationType.GROUP_RIDE_ACCEPTED,
+        actor_id=actor_id,
+        entity_type="group_ride",
+        entity_id=group_ride_id,
+        params=params,
+        deep_link=f"/group-rides/{group_ride_id}",
+        dedupe_key=f"group_ride_accepted:{group_ride_id}:{actor_id}",
+    )
+
+
+async def notify_group_ride_started(
+    db: AsyncSession,
+    *,
+    actor_id: uuid.UUID,
+    group_ride_id: uuid.UUID,
+    title: str,
+) -> list[Notification]:
+    """Tell every JOINED rider the ride has begun.
+
+    The one Phase 9 fan-out, and it is bounded by the roster rather than by a
+    team: only riders who accepted are told, so an `invited` rider who never
+    responded cannot learn the ride started, and a `withdrawn` rider does not
+    receive a push for a ride they left.
+    """
+    recipients = [uid for uid in await _joined_in_ride(db, group_ride_id) if uid != actor_id]
+    if not recipients:
+        return []
+    params = await _actor_params(db, actor_id)
+    params["groupRideTitle"] = title
+    return await notify(
+        db,
+        recipient_ids=recipients,
+        type_=NotificationType.GROUP_RIDE_STARTED,
+        actor_id=actor_id,
+        entity_type="group_ride",
+        entity_id=group_ride_id,
+        params=params,
+        deep_link=f"/group-rides/{group_ride_id}",
+        # Keyed on the ride, not the roster: every rider's "the ride started"
+        # is the same event, and a per-recipient key would let a retry after
+        # someone joined mid-ride notify them of a start they missed.
+        dedupe_key=f"group_ride_started:{group_ride_id}",
     )
 
 

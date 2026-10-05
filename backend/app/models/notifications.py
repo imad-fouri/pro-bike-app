@@ -73,21 +73,29 @@ class PushProvider(str, enum.Enum):
 
 
 class NotificationType(str, enum.Enum):
-    """The Phase 8.4 taxonomy.
+    """The notification taxonomy.
 
-    Every value corresponds to an event that already exists in Phases 8.1–8.3.
-    Deliberately absent, and listed here only as a marker so a later phase has an
-    obvious home for them — NONE of these is emitted in Phase 8.4:
+    Every value corresponds to an event that exists. The Phase 9 group-ride
+    types arrived with ADR-16 §7, each with an authorization story in place
+    first:
 
-    * ``group_ride_invitation``, ``group_ride_reminder``, ``ride_starting``
-      (FUTURE — Group Rides are out of scope and would need a ride session to
-      authorize against).
+    * ``group_ride_invitation`` — the recipient is the INVITED roster row.
+    * ``group_ride_accepted`` — the recipient is the ORGANIZER; it is the
+      inverse direction of the invitation, which is why it is a separate type
+      rather than the same one.
+    * ``group_ride_started`` — recipients are the JOINED roster.
+
+    Still deliberately absent, listed as markers for a later phase, NONE of
+    which is emitted:
+
+    * ``group_ride_reminder``, ``ride_starting`` (FUTURE — these are emitted by
+      a scheduler, and Phase 9 ships no scheduler and no ride-clock job).
     * ``training_reminder`` (FUTURE — requires scheduled-workout automation).
     * ``ai_coach_event`` (FUTURE — representation only, no emission path).
 
     Adding a value to this enum is cheap; adding one that no authorization story
-    exists for is not, which is why the absence of ride types is a decision and
-    not an oversight.
+    exists for is not, which is why the remaining absences are decisions and not
+    oversights.
     """
 
     FRIEND_REQUEST = "friend_request"
@@ -102,6 +110,12 @@ class NotificationType(str, enum.Enum):
     #: also clear the block policy. Merging them would make the privacy rule
     #: unenforceable (ADR-15 §8).
     CHAT_MESSAGE_TEAM = "chat_message_team"
+    #: A ride channel recipient must be a JOINED roster row, which is a third
+    #: authorization basis again (ADR-16 §5).
+    CHAT_MESSAGE_GROUP_RIDE = "chat_message_group_ride"
+    GROUP_RIDE_INVITATION = "group_ride_invitation"
+    GROUP_RIDE_ACCEPTED = "group_ride_accepted"
+    GROUP_RIDE_STARTED = "group_ride_started"
     SYSTEM = "system"
 
     @property

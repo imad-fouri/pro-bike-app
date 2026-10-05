@@ -1670,7 +1670,7 @@ void main() {
   });
 
   group('routing', () {
-    test('chat routes are registered and /group-rides stays a placeholder', () {
+    test('chat routes are registered and ride channels are reachable', () {
       final source = File(
         'lib/core/routing/app_router.dart',
       ).readAsStringSync();
@@ -1682,12 +1682,30 @@ void main() {
       final placeholderBlock = source.substring(
         source.indexOf('for (final p in ['),
       );
-      // Group rides and synchronized rides stay out of scope for Phase 8.3.
-      expect(placeholderBlock.contains("'/group-rides'"), isTrue);
+      // Phase 9 replaced the `/group-rides` placeholder with the real list, form
+      // and detail routes, so it must NOT be in the placeholder list any more —
+      // this assertion used to require the opposite.
+      expect(
+        placeholderBlock.contains("'/group-rides'"),
+        isFalse,
+        reason: '/group-rides is a real route since Phase 9',
+      );
       expect(
         placeholderBlock.contains("'/chat'"),
         isFalse,
         reason: '/chat must not be a placeholder any more',
+      );
+
+      // And the real routes are registered, in an order that keeps `/new` from
+      // being read as a ride id.
+      expect(source.contains("path: '/group-rides'"), isTrue);
+      expect(source.contains("path: '/group-rides/new'"), isTrue);
+      expect(source.contains("path: '/group-rides/:id'"), isTrue);
+      expect(
+        source.indexOf("path: '/group-rides/new'"),
+        lessThan(source.indexOf("path: '/group-rides/:id'")),
+        reason:
+            '/new must be registered before /:id or the form is unreachable',
       );
 
       for (final kept in [

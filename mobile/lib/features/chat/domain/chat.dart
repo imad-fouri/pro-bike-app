@@ -11,14 +11,28 @@
 /// treating location sharing as an implicit capability of "messaging".
 library;
 
+import '../../group_rides/domain/group_ride.dart' show GroupRideStatus;
+
 /// `conversations.kind`.
+///
+/// Phase 9 adds `group_ride`. The value is the literal the backend returns, and it
+/// is a THIRD kind rather than a team with a ride attached: a ride channel is
+/// authorized from the live roster and dies with the ride, so anything that reads
+/// it as a team would inherit the wrong lifetime and the wrong authorization.
 enum ConversationKind {
   team('team'),
-  direct('direct');
+  direct('direct'),
+  groupRide('group_ride');
 
   final String wire;
   const ConversationKind(this.wire);
 
+  /// Unknown kinds degrade to [direct].
+  ///
+  /// Degrading to a DIRECT row is deliberate over degrading to TEAM: a direct row
+  /// renders one peer name, and inventing a team name would show the rider a
+  /// channel that does not exist. The unread count and preview stay truthful
+  /// either way, so an unrecognized kind is degraded but never misrepresented.
   static ConversationKind parse(String? raw) => ConversationKind.values
       .firstWhere((e) => e.wire == raw, orElse: () => ConversationKind.direct);
 }
@@ -40,9 +54,10 @@ enum MessageType {
 
 /// A conversation as the viewer sees it (`ConversationOut`).
 ///
-/// Exactly one of [teamId] / [peerUserId] is set, matching the server's
-/// `ck_conversations_kind_team` check. A client that trusted both would render
-/// a hybrid row the server can never produce.
+/// Exactly one of [teamId] / [groupRideId] / [peerUserId] is set, matching the
+/// server's `ck_conversations_kind_team` check plus the ride analogue. A client
+/// that trusted more than one would render a hybrid row the server can never
+/// produce.
 class Conversation {
   final String id;
   final ConversationKind kind;
@@ -51,6 +66,15 @@ class Conversation {
   final String? teamId;
   final String? teamName;
   final String? teamHandle;
+
+  // Group-ride channel (Phase 9).
+  ///
+  /// The title and status come from the LIVE ride, not from the conversation row.
+  /// That is why a cancelled ride's inbox entry can say "Cancelled" without the
+  /// conversation itself ever being updated — the label is derived on read.
+  final String? groupRideId;
+  final String? groupRideTitle;
+  final String? groupRideStatus;
 
   // Direct message.
   final String? peerUserId;
@@ -71,6 +95,9 @@ class Conversation {
     this.teamId,
     this.teamName,
     this.teamHandle,
+    this.groupRideId,
+    this.groupRideTitle,
+    this.groupRideStatus,
     this.peerUserId,
     this.peerUsername,
     this.peerDisplayName,
@@ -89,6 +116,9 @@ class Conversation {
     teamId: json['team_id'] as String?,
     teamName: json['team_name'] as String?,
     teamHandle: json['team_handle'] as String?,
+    groupRideId: json['group_ride_id'] as String?,
+    groupRideTitle: json['group_ride_title'] as String?,
+    groupRideStatus: json['group_ride_status'] as String?,
     peerUserId: json['peer_user_id'] as String?,
     peerUsername: json['peer_username'] as String?,
     peerDisplayName: json['peer_display_name'] as String?,
@@ -103,11 +133,44 @@ class Conversation {
 
   bool get isTeam => kind == ConversationKind.team;
 
+  bool get isGroupRide => kind == ConversationKind.groupRide;
+
+  /// True for every multi-party channel. Drives the "N participants" affordance,
+  /// which applies to a team and to a ride equally and to a direct message not at
+  /// all.
+  bool get isGroup => isTeam || isGroupRide;
+
+  /// Whether this ride channel is history rather than a live channel.
+  ///
+  /// `completed` and `cancelled` are terminal, and `_assert_can_send` refuses
+  /// writes in both with `CHAT_GROUP_RIDE_CLOSED`. Hiding the composer is a
+  /// courtesy, not the enforcement — the server still re-checks inside the lock,
+  /// so a stale client that shows a composer loses nothing but a snackbar.
+  ///
+  /// An absent or unrecognised status is treated as NOT closed. Defaulting the
+  /// other way would blank the composer of a healthy ride whose status this build
+  /// has not been taught, which is a worse failure than a rejected send.
+  bool get isRideChannelClosed =>
+      isGroupRide && GroupRideStatus.parse(groupRideStatus).isTerminal;
+
   /// Best available human label. Callers pass a fallback for the "no name yet"
   /// case rather than rendering a blank row.
-  String? get bestName => isTeam ? teamName : (peerDisplayName ?? peerUsername);
+  ///
+  /// A ride's title is preferred over anything else because it is what the riders
+  /// called the thing. There is no handle for a ride, so [bestHandle] is null and
+  /// the inbox shows no `@handle` line rather than borrowing a rider's username
+  /// and implying the ride is a person.
+  String? get bestName => switch (kind) {
+    ConversationKind.team => teamName,
+    ConversationKind.groupRide => groupRideTitle,
+    ConversationKind.direct => peerDisplayName ?? peerUsername,
+  };
 
-  String? get bestHandle => isTeam ? teamHandle : peerUsername;
+  String? get bestHandle => switch (kind) {
+    ConversationKind.team => teamHandle,
+    ConversationKind.groupRide => null,
+    ConversationKind.direct => peerUsername,
+  };
 }
 
 /// One message (`MessageOut`).

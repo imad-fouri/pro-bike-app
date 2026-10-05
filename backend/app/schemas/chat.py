@@ -21,6 +21,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class ConversationKind(str, Enum):
     TEAM = "team"
     DIRECT = "direct"
+    #: Phase 9 (ADR-16 §5). A ride channel is a GROUP channel exactly like a
+    #: team one: many members, no single peer. It is its own kind rather than a
+    #: flavour of `team` because it binds to `group_ride_id` and authorizes from
+    #: the ride roster, so a client cannot tell them apart by accident.
+    GROUP_RIDE = "group_ride"
 
 
 class MessageType(str, Enum):
@@ -40,6 +45,14 @@ class ConversationOut(BaseModel):
     team_handle: str | None = None
     team_visibility: str | None = None
     team_status: str | None = None
+    #: Phase 9. Set for `group_ride` rows, null otherwise. Carried explicitly
+    #: because the `team_*` fields are all null for a ride channel, so without
+    #: this an inbox row has no way back to the ride it belongs to.
+    group_ride_id: uuid.UUID | None = None
+    #: Label for the inbox row. Not a copy the client owns: it is re-read live,
+    #: so a renamed ride cannot leave a stale title in somebody's inbox.
+    group_ride_title: str | None = None
+    group_ride_status: str | None = None
     peer_user_id: uuid.UUID | None = None
     peer_username: str | None = None
     peer_display_name: str | None = None

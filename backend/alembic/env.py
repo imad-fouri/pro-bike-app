@@ -29,8 +29,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError(
+            "sqlalchemy.url is not set; set it in alembic.ini or via ALEMBIC_DB_URL"
+        )
     engine = create_engine(
-        config.get_main_option("sqlalchemy.url").replace("+asyncpg", ""),
+        url.replace("+asyncpg", ""),
         poolclass=pool.NullPool,
     )
     with engine.connect() as connection:

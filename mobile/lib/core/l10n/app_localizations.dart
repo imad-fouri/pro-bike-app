@@ -164,6 +164,18 @@ class AppLocalizations {
       'chat.error.teamArchived':
           'This team is archived, so it does not accept new messages.',
       'chat.error.teamUnavailable': 'This team is not available.',
+
+      // Phase 9 — a ride channel that has reached `completed` or `cancelled`.
+      // `chat.rideClosed` is the generic banner; the two specific sentences exist
+      // because "finished" and "called off" are different facts about a ride, and
+      // collapsing them would tell a rider their ride was cancelled when it ran.
+      'chat.error.rideClosed': 'This ride is no longer active.',
+      'chat.rideClosed':
+          'This ride has finished, so it no longer accepts messages.',
+      'chat.rideCompleted':
+          'This ride is complete, so it no longer accepts messages.',
+      'chat.rideCancelled':
+          'This ride was cancelled, so it no longer accepts messages.',
       'chat.error.forbidden': 'You cannot post in this team.',
       'chat.error.cannotTargetSelf': 'You cannot message yourself.',
       'chat.error.editWindowClosed':
@@ -209,6 +221,23 @@ class AppLocalizations {
       'notifications.type.chat_message_team.title': 'New team message',
       'notifications.type.chat_message_team.body':
           '{actorName} posted in {teamName}.',
+
+      // Phase 9 — group rides. Keys are `notifications.type.<wire>` because the
+      // SERVER derives them from the stored type
+      // (`NotificationType.l10n_key`); these are a storage contract, not a local
+      // naming choice. Params are exactly `actorName` and `groupRideTitle`.
+      'notifications.type.group_ride_invitation.title': 'Ride invitation',
+      'notifications.type.group_ride_invitation.body':
+          '{actorName} invited you to join {groupRideTitle}.',
+      'notifications.type.group_ride_accepted.title': 'Invitation accepted',
+      'notifications.type.group_ride_accepted.body':
+          '{actorName} is going on {groupRideTitle}.',
+      'notifications.type.group_ride_started.title': 'Your ride started',
+      'notifications.type.group_ride_started.body':
+          '{groupRideTitle} has started. {actorName} started it.',
+      'notifications.type.chat_message_group_ride.title': 'New ride message',
+      'notifications.type.chat_message_group_ride.body':
+          '{actorName} posted in {groupRideTitle}.',
       'notifications.type.system.title': 'CycleCoach',
       'notifications.type.system.body': 'There is an update to your account.',
       // Fallback shown when a server-supplied l10n_key is unknown to this build.
@@ -703,6 +732,125 @@ class AppLocalizations {
       'social.category.e_bike': 'E-bike',
       'social.category.commuting': 'Commuting',
       'social.category.other': 'Other',
+
+      // Phase 9 — group rides. Namespaced `groupRide.` rather than `ride.` on
+      // purpose: `ride.start` already means "start recording", and two features
+      // sharing a prefix would make one of them silently wrong (ADR-16).
+      'groupRide.myRides': 'Group rides',
+      'groupRide.rideTitle': 'Ride',
+      'groupRide.invitations': 'Invitations',
+      'groupRide.noRides': 'You have no group rides yet',
+      'groupRide.createRide': 'Create a group ride',
+      'groupRide.create': 'Create ride',
+      'groupRide.organizer': 'Organizer',
+      'groupRide.roster': 'Roster',
+      'groupRide.noRoster': 'Nobody is on this ride yet',
+      'groupRide.ridersCount': '{count} riders',
+      'groupRide.notOnThisRide': 'You are not on this ride',
+      'groupRide.title': 'Title',
+      'groupRide.description': 'Description',
+      'groupRide.when': 'When',
+      'groupRide.startsAtHint':
+          'Optional. This is the plan, not a rule — the ride is not held for you.',
+      'groupRide.noDate': 'No date set',
+      'groupRide.meetingPoint': 'Meeting point',
+      'groupRide.meetingPointHint': 'Where riders should meet',
+      'groupRide.meetingAt': 'Meet at {place}',
+      'groupRide.route': 'Route',
+      'groupRide.routePinHint':
+          'Optional. This ride is pinned to the exact version you pick, so the route cannot change under riders later.',
+      'groupRide.versionLabel': 'Version {n}',
+      'groupRide.pinnedTo': 'Pinned to version {n}',
+      'groupRide.noRoute': 'No route',
+      'groupRide.noRoutesToPin': 'You have no routes to pin yet',
+      'groupRide.routesUnavailable': 'Your routes could not be loaded',
+      'groupRide.accept': 'Accept',
+      'groupRide.decline': 'Decline',
+      'groupRide.leave': 'Leave ride',
+      'groupRide.leaveConfirm':
+          'Leave this ride? You can be invited again while it is still open.',
+      'groupRide.invite': 'Invite riders',
+      'groupRide.inviteRiders': 'Invite riders',
+      'groupRide.inviteMessage': 'Message (optional)',
+      'groupRide.inviteCount': 'Invite ({count})',
+      'groupRide.invitedBy': 'Invited by {name}',
+      'groupRide.nobodyLeftToInvite': 'Nobody left to invite',
+      'groupRide.remove': 'Remove',
+      'groupRide.removeConfirm': 'Remove {name} from this ride?',
+      'groupRide.start': 'Start ride',
+      'groupRide.needAnotherRider': 'Invite at least one more rider to start',
+      'groupRide.complete': 'Finish ride',
+      'groupRide.cancelRide': 'Cancel ride',
+      'groupRide.cancelConfirm':
+          'Cancel this ride? Nobody will be able to join, and it cannot be undone.',
+      'groupRide.rideFinished': 'This ride is finished',
+      'groupRide.rideCancelled': 'This ride was cancelled',
+      'groupRide.rideChat': 'Ride chat',
+      'groupRide.noNewMessages': 'No new messages',
+      'groupRide.unreadMessages': '{count} new',
+      'groupRide.liveLocation': 'Live location',
+      'groupRide.invalidTitle': 'Enter a title of 1-120 characters',
+      'groupRide.invalidDescription': 'Description is too long',
+      'groupRide.invalidMeetingPoint': 'Meeting point is too long',
+      'groupRide.invalidInviteMessage': 'Message is too long',
+      'groupRide.invalidRoutePin': 'Pick a route and its version',
+
+      // Roster and lifecycle vocabulary. Five roster states, because "not on the
+      // ride" means three different things depending on who decided.
+      'groupRide.status.open': 'Open',
+      'groupRide.status.started': 'Started',
+      'groupRide.status.completed': 'Completed',
+      'groupRide.status.cancelled': 'Cancelled',
+      'groupRide.role.organizer': 'Organizer',
+      'groupRide.role.participant': 'Rider',
+      'groupRide.participant.invited': 'Invited',
+      'groupRide.participant.joined': 'Going',
+      'groupRide.participant.declined': 'Declined',
+      'groupRide.participant.left': 'Left',
+      'groupRide.participant.removed': 'Removed',
+
+      // Live location. The consent notice is shown every time the panel is
+      // opened, because sharing is always this rider's decision to make again
+      // (ADR-16 §6).
+      'groupRide.location.consentNotice':
+          'Off by default. Turning this on shares your position with riders on this ride only. It expires on its own.',
+      'groupRide.location.you': 'You',
+      'groupRide.location.lastSeen': 'Updated {age}s ago',
+      'groupRide.location.nobodySharing': 'Nobody is sharing right now',
+      'groupRide.location.unavailable':
+          'Live location could not be loaded. This is not the same as nobody sharing.',
+      'groupRide.location.granted': 'Location is on',
+      'groupRide.location.denied':
+          'Location permission was refused, so you are not sharing',
+      'groupRide.location.deniedForever':
+          'Location is blocked for this app. Allow it in settings to share',
+      'groupRide.location.serviceOff': 'Turn on location services to share',
+      'groupRide.location.imprecise':
+          'Approximate location is not precise enough to share',
+      'groupRide.location.openSettings': 'Settings',
+
+      // Server codes. Each maps to one sentence; nothing is rendered raw.
+      'groupRide.error.rosterFrozen':
+          'The roster is fixed once the ride starts',
+      'groupRide.error.closed': 'This ride is closed',
+      'groupRide.error.notOpen': 'This ride is not open yet',
+      'groupRide.error.notStarted': 'This ride has not started',
+      'groupRide.error.needsRiders': 'Invite at least one more rider first',
+      'groupRide.error.notInvited': 'You are not invited to this ride',
+      'groupRide.error.alreadyMember': 'You are already on this ride',
+      'groupRide.error.organizerCannotLeave':
+          'The organizer cannot leave their own ride',
+      'groupRide.error.organizerImmutable': 'The organizer cannot be removed',
+      'groupRide.error.blocked': 'That rider is not accepting invitations',
+      'groupRide.error.memberUnavailable':
+          'That rider cannot be added right now',
+      'groupRide.error.routeIncomplete': 'This ride is not pinned to a route',
+      'groupRide.error.routeVersionNotFound':
+          'That route version no longer exists',
+      'groupRide.error.locationUnavailable': 'Live location is unavailable',
+      'groupRide.error.channelClosed':
+          'This ride chat is closed. Ask a rider on the ride instead',
+      'groupRide.error.notFound': 'This ride is not available',
     },
     'fr': {
       // Phase 8.2 — équipes et groupes cycliste.
@@ -856,6 +1004,15 @@ class AppLocalizations {
       'chat.error.teamArchived':
           'Cette équipe est archivée : elle n\'accepte plus de nouveaux messages.',
       'chat.error.teamUnavailable': 'Cette équipe n\'est pas disponible.',
+
+      // Phase 9 — un canal de sortie arrivé à `completed` ou `cancelled`.
+      'chat.error.rideClosed': 'Cette sortie n\'est plus active.',
+      'chat.rideClosed':
+          'Cette sortie est terminée et n\'accepte plus de messages.',
+      'chat.rideCompleted':
+          'Cette sortie est terminée et n\'accepte plus de messages.',
+      'chat.rideCancelled':
+          'Cette sortie a été annulée et n\'accepte plus de messages.',
       'chat.error.forbidden': 'Vous ne pouvez pas publier dans cette équipe.',
       'chat.error.cannotTargetSelf': 'Vous ne pouvez pas vous écrire.',
       'chat.error.editWindowClosed':
@@ -906,6 +1063,23 @@ class AppLocalizations {
       'notifications.type.chat_message_team.title': 'Nouveau message d\'équipe',
       'notifications.type.chat_message_team.body':
           '{actorName} a publié dans {teamName}.',
+
+      // Phase 9 — sorties de groupe. Les clés viennent du serveur
+      // (`NotificationType.l10n_key`) : c’est un contrat de stockage.
+      'notifications.type.group_ride_invitation.title':
+          'Invitation à une sortie',
+      'notifications.type.group_ride_invitation.body':
+          '{actorName} vous a invité à rejoindre {groupRideTitle}.',
+      'notifications.type.group_ride_accepted.title': 'Invitation acceptée',
+      'notifications.type.group_ride_accepted.body':
+          '{actorName} participe à {groupRideTitle}.',
+      'notifications.type.group_ride_started.title': 'Votre sortie a démarré',
+      'notifications.type.group_ride_started.body':
+          '{groupRideTitle} a démarré. {actorName} l’a lancée.',
+      'notifications.type.chat_message_group_ride.title':
+          'Nouveau message de sortie',
+      'notifications.type.chat_message_group_ride.body':
+          '{actorName} a publié dans {groupRideTitle}.',
       'notifications.type.system.title': 'CycleCoach',
       'notifications.type.system.body':
           'Il y a une mise à jour de votre compte.',
@@ -1043,6 +1217,125 @@ class AppLocalizations {
       'social.category.e_bike': 'VAE',
       'social.category.commuting': 'Ville',
       'social.category.other': 'Autre',
+
+      // Phase 9 — sorties de groupe. Préfixe `groupRide.` et non `ride.` :
+      // `ride.start` signifie déjà « démarrer l’enregistrement », et deux
+      // fonctionnalités dans le même préfixe finissent par se contredire (ADR-16).
+      'groupRide.myRides': 'Sorties de groupe',
+      'groupRide.rideTitle': 'Sortie',
+      'groupRide.invitations': 'Invitations',
+      'groupRide.noRides': 'Vous n’avez pas encore de sortie de groupe',
+      'groupRide.createRide': 'Créer une sortie de groupe',
+      'groupRide.create': 'Créer la sortie',
+      'groupRide.organizer': 'Organisateur',
+      'groupRide.roster': 'Participants',
+      'groupRide.noRoster': 'Personne n’est encore sur cette sortie',
+      'groupRide.ridersCount': '{count} participants',
+      'groupRide.notOnThisRide': 'Vous n’êtes pas sur cette sortie',
+      'groupRide.title': 'Titre',
+      'groupRide.description': 'Description',
+      'groupRide.when': 'Quand',
+      'groupRide.startsAtHint':
+          'Facultatif. C’est un plan, pas une règle : la sortie ne vous attend pas.',
+      'groupRide.noDate': 'Aucune date',
+      'groupRide.meetingPoint': 'Point de rendez-vous',
+      'groupRide.meetingPointHint': 'Où les participants doivent se retrouver',
+      'groupRide.meetingAt': 'Rendez-vous à {place}',
+      'groupRide.route': 'Parcours',
+      'groupRide.routePinHint':
+          'Facultatif. Cette sortie est liée à la version exacte choisie, pour que le parcours ne change pas ensuite sous les participants.',
+      'groupRide.versionLabel': 'Version {n}',
+      'groupRide.pinnedTo': 'Fixe à la version {n}',
+      'groupRide.noRoute': 'Aucun parcours',
+      'groupRide.noRoutesToPin': 'Vous n’avez pas encore de parcours',
+      'groupRide.routesUnavailable': 'Vos parcours n’ont pas pu être chargés',
+      'groupRide.accept': 'Accepter',
+      'groupRide.decline': 'Refuser',
+      'groupRide.leave': 'Quitter la sortie',
+      'groupRide.leaveConfirm':
+          'Quitter cette sortie ? Vous pourrez être réinvité tant qu’elle est ouverte.',
+      'groupRide.invite': 'Inviter des participants',
+      'groupRide.inviteRiders': 'Inviter des participants',
+      'groupRide.inviteMessage': 'Message (facultatif)',
+      'groupRide.inviteCount': 'Inviter ({count})',
+      'groupRide.invitedBy': 'Invité par {name}',
+      'groupRide.nobodyLeftToInvite': 'Personne à inviter',
+      'groupRide.remove': 'Retirer',
+      'groupRide.removeConfirm': 'Retirer {name} de cette sortie ?',
+      'groupRide.start': 'Démarrer la sortie',
+      'groupRide.needAnotherRider':
+          'Invitez au moins un autre participant pour démarrer',
+      'groupRide.complete': 'Terminer la sortie',
+      'groupRide.cancelRide': 'Annuler la sortie',
+      'groupRide.cancelConfirm':
+          'Annuler cette sortie ? Personne ne pourra la rejoindre et c’est irréversible.',
+      'groupRide.rideFinished': 'Cette sortie est terminée',
+      'groupRide.rideCancelled': 'Cette sortie a été annulée',
+      'groupRide.rideChat': 'Discussion de la sortie',
+      'groupRide.noNewMessages': 'Aucun nouveau message',
+      'groupRide.unreadMessages': '{count} nouveau(s)',
+      'groupRide.liveLocation': 'Position en direct',
+      'groupRide.invalidTitle': 'Saisissez un titre de 1 à 120 caractères',
+      'groupRide.invalidDescription': 'La description est trop longue',
+      'groupRide.invalidMeetingPoint': 'Le point de rendez-vous est trop long',
+      'groupRide.invalidInviteMessage': 'Le message est trop long',
+      'groupRide.invalidRoutePin': 'Choisissez un parcours et sa version',
+
+      'groupRide.status.open': 'Ouverte',
+      'groupRide.status.started': 'En cours',
+      'groupRide.status.completed': 'Terminée',
+      'groupRide.status.cancelled': 'Annulée',
+      'groupRide.role.organizer': 'Organisateur',
+      'groupRide.role.participant': 'Participant',
+      'groupRide.participant.invited': 'Invité',
+      'groupRide.participant.joined': 'Participe',
+      'groupRide.participant.declined': 'A refusé',
+      'groupRide.participant.left': 'A quitté',
+      'groupRide.participant.removed': 'Retiré',
+
+      'groupRide.location.consentNotice':
+          'Désactivé par défaut. Activer cette option partage votre position uniquement avec les participants de cette sortie. Elle expire d’elle-même.',
+      'groupRide.location.you': 'Vous',
+      'groupRide.location.lastSeen': 'Mis à jour il y a {age} s',
+      'groupRide.location.nobodySharing': 'Personne ne partage sa position',
+      'groupRide.location.unavailable':
+          'La position en direct n’a pas pu être chargée. Ce n’est pas la même chose que personne ne partage.',
+      'groupRide.location.granted': 'La localisation est activée',
+      'groupRide.location.denied':
+          'L’autorisation de localisation a été refusée, vous ne partagez pas votre position',
+      'groupRide.location.deniedForever':
+          'La localisation est bloquée pour cette application. Autorisez-la dans les réglages',
+      'groupRide.location.serviceOff':
+          'Activez les services de localisation pour partager',
+      'groupRide.location.imprecise':
+          'Une position approximative n’est pas assez précise pour être partagée',
+      'groupRide.location.openSettings': 'Réglages',
+
+      'groupRide.error.rosterFrozen':
+          'La liste des participants est figée au démarrage',
+      'groupRide.error.closed': 'Cette sortie est fermée',
+      'groupRide.error.notOpen': 'Cette sortie n’est pas encore ouverte',
+      'groupRide.error.notStarted': 'Cette sortie n’a pas démarré',
+      'groupRide.error.needsRiders':
+          'Invitez d’abord au moins un autre participant',
+      'groupRide.error.notInvited': 'Vous n’êtes pas invité à cette sortie',
+      'groupRide.error.alreadyMember': 'Vous participez déjà à cette sortie',
+      'groupRide.error.organizerCannotLeave':
+          'L’organisateur ne peut pas quitter sa propre sortie',
+      'groupRide.error.organizerImmutable':
+          'L’organisateur ne peut pas être retiré',
+      'groupRide.error.blocked': 'Ce participant n’accepte pas les invitations',
+      'groupRide.error.memberUnavailable':
+          'Ce participant ne peut pas être ajouté pour le moment',
+      'groupRide.error.routeIncomplete':
+          'Cette sortie n’est liée à aucun parcours',
+      'groupRide.error.routeVersionNotFound':
+          'Cette version de parcours n’existe plus',
+      'groupRide.error.locationUnavailable':
+          'La position en direct est indisponible',
+      'groupRide.error.channelClosed':
+          'Cette discussion est fermée. Demandez à un participant de la sortie',
+      'groupRide.error.notFound': 'Cette sortie n’est pas disponible',
       'appTitle': 'CycleCoach',
       'welcome': 'Rouler • Explorer',
       'auth.login': 'Se connecter',
@@ -1553,6 +1846,12 @@ class AppLocalizations {
       'chat.error.blocked': 'لا يمكنك مراسلة هذا الدرّاج أثناء سريان الحظر.',
       'chat.error.teamArchived': 'هذا الفريق مؤرشف، لذا لا يقبل رسائل جديدة.',
       'chat.error.teamUnavailable': 'هذا الفريق غير متاح.',
+
+      // Phase 9 — قناة رحلة وصلت إلى `completed` أو `cancelled`.
+      'chat.error.rideClosed': 'هذه الرحلة لم تعد نشطة.',
+      'chat.rideClosed': 'انتهت هذه الرحلة ولم تعد تقبل الرسائل.',
+      'chat.rideCompleted': 'اكتملت هذه الرحلة ولم تعد تقبل الرسائل.',
+      'chat.rideCancelled': 'أُلغيت هذه الرحلة ولم تعد تقبل الرسائل.',
       'chat.error.forbidden': 'لا يمكنك النشر في هذا الفريق.',
       'chat.error.cannotTargetSelf': 'لا يمكنك مراسلة نفسك.',
       'chat.error.editWindowClosed': 'انتهت مهلة تعديل الرسالة (15 دقيقة).',
@@ -1595,6 +1894,21 @@ class AppLocalizations {
       'notifications.type.chat_message_team.title': 'رسالة فريق جديدة',
       'notifications.type.chat_message_team.body':
           'نشر {actorName} في {teamName}.',
+
+      // Phase 9 — الرحلات الجماعية. المفاتيح قادمة من الخادم
+      // (`NotificationType.l10n_key`): هذا عقد تخزين لا تسمية محلية.
+      'notifications.type.group_ride_invitation.title': 'دعوة إلى رحلة',
+      'notifications.type.group_ride_invitation.body':
+          'دعاك {actorName} للانضمام إلى {groupRideTitle}.',
+      'notifications.type.group_ride_accepted.title': 'قُبلت الدعوة',
+      'notifications.type.group_ride_accepted.body':
+          'شارك {actorName} في {groupRideTitle}.',
+      'notifications.type.group_ride_started.title': 'بدأت رحلتك',
+      'notifications.type.group_ride_started.body':
+          'بدأت {groupRideTitle}. قام {actorName} ببدءها.',
+      'notifications.type.chat_message_group_ride.title': 'رسالة رحلة جديدة',
+      'notifications.type.chat_message_group_ride.body':
+          'نشر {actorName} في {groupRideTitle}.',
       'notifications.type.system.title': 'CycleCoach',
       'notifications.type.system.body': 'هناك تحديث لحسابك.',
       // نص بديل تُعرض عندما لا يعرف هذا الإصدار المفتاح الوارد من الخادم.
@@ -1724,6 +2038,115 @@ class AppLocalizations {
       'social.category.e_bike': 'كهربائية',
       'social.category.commuting': 'تنقل',
       'social.category.other': 'أخرى',
+
+      // Phase 9 — رحلات جماعية. بادئة `groupRide.` وليست `ride.` لأن
+      // `ride.start` تعني أصلاً «بدء التسجيل»، وأن ميزتين بنفس البادئة تنتهيان
+      // إلى تناقض بينهما (ADR-16).
+      'groupRide.myRides': 'الرحلات الجماعية',
+      'groupRide.rideTitle': 'رحلة',
+      'groupRide.invitations': 'الدعوات',
+      'groupRide.noRides': 'لا توجد لديك رحلات جماعية بعد',
+      'groupRide.createRide': 'إنشاء رحلة جماعية',
+      'groupRide.create': 'إنشاء الرحلة',
+      'groupRide.organizer': 'المنظّم',
+      'groupRide.roster': 'المشاركون',
+      'groupRide.noRoster': 'لا أحد في هذه الرحلة بعد',
+      'groupRide.ridersCount': '{count} مشاركًا',
+      'groupRide.notOnThisRide': 'لست في هذه الرحلة',
+      'groupRide.title': 'العنوان',
+      'groupRide.description': 'الوصف',
+      'groupRide.when': 'متى',
+      'groupRide.startsAtHint':
+          'اختياري. هذا موعد مخطَّط، ليس قاعدة: الرحلة لا تنتظرك.',
+      'groupRide.noDate': 'بلا تاريخ',
+      'groupRide.meetingPoint': 'نقطة اللقاء',
+      'groupRide.meetingPointHint': 'حيث يجتمع المشاركون',
+      'groupRide.meetingAt': 'اللقاء عند {place}',
+      'groupRide.route': 'المسار',
+      'groupRide.routePinHint':
+          'اختياري. هذه الرحلة مرتبطة بالإصدار الدقيق الذي تختاره، حتى لا يتغير المسار لاحقًا تحت أقدام المشاركين.',
+      'groupRide.versionLabel': 'الإصدار {n}',
+      'groupRide.pinnedTo': 'مرتبطة بالإصدار {n}',
+      'groupRide.noRoute': 'بلا مسار',
+      'groupRide.noRoutesToPin': 'لا تملك مسارات بعد',
+      'groupRide.routesUnavailable': 'تعذّر تحميل مساراتك',
+      'groupRide.accept': 'قبول',
+      'groupRide.decline': 'رفض',
+      'groupRide.leave': 'مغادرة الرحلة',
+      'groupRide.leaveConfirm':
+          'هل تريد مغادرة هذه الرحلة؟ يمكنك دعوتك مجددًا ما دامت مفتوحة.',
+      'groupRide.invite': 'دعوة المشاركين',
+      'groupRide.inviteRiders': 'دعوة المشاركين',
+      'groupRide.inviteMessage': 'رسالة (اختياري)',
+      'groupRide.inviteCount': 'دعوة ({count})',
+      'groupRide.invitedBy': 'دعاك {name}',
+      'groupRide.nobodyLeftToInvite': 'لا أحد متبقٍ لدعوته',
+      'groupRide.remove': 'إزالة',
+      'groupRide.removeConfirm': 'هل تريد إزالة {name} من هذه الرحلة؟',
+      'groupRide.start': 'بدء الرحلة',
+      'groupRide.needAnotherRider': 'ادعُ مشاركًا واحدًا على الأقل للبدء',
+      'groupRide.complete': 'إنهاء الرحلة',
+      'groupRide.cancelRide': 'إلغاء الرحلة',
+      'groupRide.cancelConfirm':
+          'هل تريد إلغاء هذه الرحلة؟ لن يتمكن أحد من الانضمام، ولا يمكن التراجع.',
+      'groupRide.rideFinished': 'انتهت هذه الرحلة',
+      'groupRide.rideCancelled': 'أُلغيت هذه الرحلة',
+      'groupRide.rideChat': 'دردشة الرحلة',
+      'groupRide.noNewMessages': 'لا رسائل جديدة',
+      'groupRide.unreadMessages': '{count} جديدة',
+      'groupRide.liveLocation': 'الموقع المباشر',
+      'groupRide.invalidTitle': 'أدخل عنوانًا من 1 إلى 120 حرفًا',
+      'groupRide.invalidDescription': 'الوصف طويل جدًا',
+      'groupRide.invalidMeetingPoint': 'نقطة اللقاء طويلة جدًا',
+      'groupRide.invalidInviteMessage': 'الرسالة طويلة جدًا',
+      'groupRide.invalidRoutePin': 'اختر مسارًا وإصداره',
+
+      'groupRide.status.open': 'مفتوحة',
+      'groupRide.status.started': 'جارٍ',
+      'groupRide.status.completed': 'مكتملة',
+      'groupRide.status.cancelled': 'ملغاة',
+      'groupRide.role.organizer': 'منظّم',
+      'groupRide.role.participant': 'مشارك',
+      'groupRide.participant.invited': 'مدعوّ',
+      'groupRide.participant.joined': 'مشارك',
+      'groupRide.participant.declined': 'رفض',
+      'groupRide.participant.left': 'غادر',
+      'groupRide.participant.removed': 'مُزال',
+
+      'groupRide.location.consentNotice':
+          'موقوف افتراضيًا. تفعيل هذه الخيار يشارك موقعك مع مشاركي هذه الرحلة فقط، وينتهي تلقائيًا.',
+      'groupRide.location.you': 'أنت',
+      'groupRide.location.lastSeen': 'حُدّث قبل {age} ث',
+      'groupRide.location.nobodySharing': 'لا أحد يشارك موقعه الآن',
+      'groupRide.location.unavailable':
+          'تعذّر تحميل الموقع المباشر. وهذا ليس نفس حالة «لا أحد يشارك».',
+      'groupRide.location.granted': 'تحديد الموقع مُفعّل',
+      'groupRide.location.denied': 'رُفض إذن الموقع، لذا لا تشارك موقعك',
+      'groupRide.location.deniedForever':
+          'الموقع محظور لهذا التطبيق. اسمح به من الإعدادات للمشاركة',
+      'groupRide.location.serviceOff': 'شغّل خدمات الموقع للمشاركة',
+      'groupRide.location.imprecise':
+          'الموقع التقريبي ليس دقيقًا بما يكفي للمشاركة',
+      'groupRide.location.openSettings': 'الإعدادات',
+
+      'groupRide.error.rosterFrozen': 'قائمة المشاركين تُثبَّت عند بدء الرحلة',
+      'groupRide.error.closed': 'هذه الرحلة مغلقة',
+      'groupRide.error.notOpen': 'هذه الرحلة ليست مفتوحة بعد',
+      'groupRide.error.notStarted': 'لم تبدأ هذه الرحلة بعد',
+      'groupRide.error.needsRiders': 'ادعُ مشاركًا واحدًا على الأقل أولًا',
+      'groupRide.error.notInvited': 'لست مدعوًا إلى هذه الرحلة',
+      'groupRide.error.alreadyMember': 'أنت مشارك في هذه الرحلة بالفعل',
+      'groupRide.error.organizerCannotLeave':
+          'لا يستطيع المنظّم مغادرة رحلته الخاصة',
+      'groupRide.error.organizerImmutable': 'لا يمكن إزالة المنظّم',
+      'groupRide.error.blocked': 'هذا المشارك لا يقبل الدعوات',
+      'groupRide.error.memberUnavailable': 'لا يمكن إضافة هذا المشارك الآن',
+      'groupRide.error.routeIncomplete': 'هذه الرحلة غير مرتبطة بأي مسار',
+      'groupRide.error.routeVersionNotFound': 'لم يعد إصدار المسار هذا موجودًا',
+      'groupRide.error.locationUnavailable': 'الموقع المباشر غير متاح',
+      'groupRide.error.channelClosed':
+          'دردشة هذه الرحلة مغلقة. اسأل أحد المشاركين في الرحلة',
+      'groupRide.error.notFound': 'هذه الرحلة غير متاحة',
       'appTitle': 'CycleCoach',
       'welcome': 'درّب • اركب • استكشف',
       'auth.login': 'تسجيل الدخول',

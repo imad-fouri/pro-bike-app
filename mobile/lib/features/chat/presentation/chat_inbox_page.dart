@@ -5,8 +5,34 @@ import 'package:go_router/go_router.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../social/presentation/social_widgets.dart';
+import '../domain/chat.dart';
 import 'chat_providers.dart';
 import 'chat_widgets.dart';
+
+/// Where tapping an inbox row goes.
+///
+/// Carries the ride status for a ride channel so the destination can hide the
+/// composer on a finished ride instead of letting the rider compose a message
+/// the server will reject with `CHAT_GROUP_RIDE_CLOSED`.
+///
+/// Query-parameter navigation, not a lookup: the inbox row already holds every
+/// field, and re-fetching the conversation to learn something the row said would
+/// be a round trip spent on a courtesy. The destination treats it as a hint only
+/// — `_assert_can_send` re-reads the ride status inside the lock.
+///
+/// Only ride channels carry the parameter. For a DM or a team channel a status
+/// would be meaningless, and sending one would imply the server had told us
+/// something about a channel it does not have statuses for.
+String _conversationUri(Conversation conversation) {
+  final params = <String, String>{'name': conversation.bestName ?? ''};
+  if (conversation.isGroupRide && conversation.groupRideStatus != null) {
+    params['rideStatus'] = conversation.groupRideStatus!;
+  }
+  final query = params.entries
+      .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+      .join('&');
+  return '/chat/${conversation.id}?$query';
+}
 
 /// The inbox: every conversation the viewer can see, newest activity first.
 ///
@@ -51,9 +77,7 @@ class ChatInboxPage extends ConsumerWidget {
                 final conversation = page.items[i];
                 return ConversationTile(
                   conversation: conversation,
-                  onTap: () => context.push(
-                    '/chat/${conversation.id}?name=${Uri.encodeComponent(conversation.bestName ?? '')}',
-                  ),
+                  onTap: () => context.push(_conversationUri(conversation)),
                 );
               },
             ),

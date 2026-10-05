@@ -13,6 +13,10 @@
 library;
 
 /// `notifications.type`.
+///
+/// Phase 9 adds the four group-ride types. Their wire values and their
+/// localization keys are a STORAGE contract: renaming one would orphan rows
+/// already in a rider's history, so these strings are append-only.
 enum NotificationType {
   friendRequest('friend_request'),
   friendRequestAccepted('friend_request_accepted'),
@@ -22,6 +26,13 @@ enum NotificationType {
   teamArchived('team_archived'),
   chatMessage('chat_message'),
   chatMessageTeam('chat_message_team'),
+
+  // Phase 9 — group rides.
+  groupRideInvitation('group_ride_invitation'),
+  groupRideAccepted('group_ride_accepted'),
+  groupRideStarted('group_ride_started'),
+  chatMessageGroupRide('chat_message_group_ride'),
+
   system('system');
 
   final String wire;
@@ -48,8 +59,14 @@ enum NotificationType {
 
   /// Whether an unread count of this type should render as a dot rather than a
   /// number. Team-wide events are low-value per item.
+  ///
+  /// `group_ride_started` is a dot for the same reason `team_archived` is: one ride
+  /// starting is one event no matter how many riders are on it, and a "3" beside
+  /// "Your ride started" would imply three separate rides started.
   bool get isBulk => switch (this) {
-    NotificationType.teamArchived || NotificationType.chatMessageTeam => true,
+    NotificationType.teamArchived ||
+    NotificationType.chatMessageTeam ||
+    NotificationType.groupRideStarted => true,
     _ => false,
   };
 }

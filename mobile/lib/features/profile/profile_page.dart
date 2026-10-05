@@ -98,6 +98,20 @@ class ProfilePage extends ConsumerWidget {
                   onTap: () => context.go('/profile/social'),
                 ),
                 const Divider(height: 1, indent: 16, endIndent: 16),
+                // Phase 9: group rides sit next to teams and chat rather than
+                // inside the social profile, because a ride is a scheduled
+                // arrangement rather than a piece of identity — and because the
+                // invite flow needs the friends list, which this screen already
+                // leads to one row above.
+                ListTile(
+                  key: const Key('profile.groupRides'),
+                  leading: const Icon(Icons.groups_rounded),
+                  title: Text(t.get('groupRide.myRides')),
+                  subtitle: Text(t.get('groupRide.invitations')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.go('/group-rides'),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
                 ListTile(
                   leading: const Icon(Icons.settings_outlined),
                   title: Text(t.get('profile.settings')),

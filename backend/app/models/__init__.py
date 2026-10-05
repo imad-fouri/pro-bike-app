@@ -6,6 +6,13 @@ from app.models.chat import (  # noqa: F401
     Message,
     MessageType,
 )
+from app.models.group_ride import (  # noqa: F401
+    GroupRide,
+    GroupRideParticipant,
+    GroupRideParticipantStatus,
+    GroupRideRole,
+    GroupRideStatus,
+)
 from app.models.notifications import (  # noqa: F401
     Notification,
     NotificationType,

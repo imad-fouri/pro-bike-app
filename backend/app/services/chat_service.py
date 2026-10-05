@@ -13,6 +13,13 @@ Four rules hold everywhere in this module.
    answer as a conversation that does not exist, so no endpoint can be used to
    probe which conversation ids are real (ADR-14 §12).
 
+   ONE EXCEPTION, AND IT IS ABOUT *WRITING*, NOT *KNOWING IT EXISTS*: a rider
+   who can see a ride channel but may not post in it any more — because the
+   ride completed, was cancelled, or they withdrew — gets 403. Standing is
+   already established by the successful read, so the refusal reveals nothing
+   new, and it has to be distinguishable from the 404 above or a client cannot
+   tell "retry later" from "this is not yours".
+
 3. BLOCKS BOUND DIRECT MESSAGES ONLY. A block in either direction refuses DM
    creation and DM sending. It does NOT touch a team channel: a block is a
    personal-interaction boundary, not a team membership or visibility change,
@@ -33,7 +40,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
@@ -47,6 +54,12 @@ from app.models.chat import (
     ConversationMember,
     Message,
     MessageType,
+)
+from app.models.group_ride import (
+    GroupRide,
+    GroupRideParticipant,
+    GroupRideParticipantStatus,
+    GroupRideStatus,
 )
 from app.models.social import SocialProfile, UserBlock
 from app.models.team import Team, TeamMembership, TeamStatus
@@ -131,6 +144,24 @@ async def _team_membership(
     return res.scalar_one_or_none()
 
 
+async def _joined_in_ride(db: AsyncSession, ride_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """Whether this rider is currently ON the ride.
+
+    The live `group_ride_participants` row is the authority for a ride channel
+    (ADR-16 §5), exactly as `team_memberships` is for a team channel. Checking
+    only `status == JOINED` — and not "row exists" — is what makes withdrawal
+    take effect immediately instead of whenever the roster is next synced.
+    """
+    res = await db.execute(
+        select(GroupRideParticipant.id).where(
+            GroupRideParticipant.group_ride_id == ride_id,
+            GroupRideParticipant.user_id == user_id,
+            GroupRideParticipant.status == GroupRideParticipantStatus.JOINED,
+        )
+    )
+    return res.scalar_one_or_none() is not None
+
+
 async def _blocked_either_way(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> bool:
     res = await db.execute(
         select(UserBlock.id).where(
@@ -181,6 +212,11 @@ async def _require_participant(
       decides standing. A rider removed from a team keeps their roster row so
       history stays attributable, which means the roster alone would wrongly
       keep granting access.
+    * GROUP_RIDE — same shape as TEAM, but the live authority is a JOINED
+      `group_ride_participants` row (ADR-16 §5). This is why a ride channel
+      cannot reuse the team branch: `team_id` is NULL on it, so there is no team
+      to re-derive from, and re-deriving from conversation_members would keep
+      granting access to a rider who just withdrew from the ride.
     """
     member = await _member_row(db, conversation.id, viewer.id)
     if member is None:
@@ -197,6 +233,13 @@ async def _require_participant(
         membership = await _team_membership(db, team.id, viewer.id)
         if membership is None:
             # Removed or never joined: history is not theirs to read.
+            raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
+    elif conversation.kind == ConversationKind.GROUP_RIDE:
+        # Withdrew, declined or was removed from the ride: the channel still
+        # exists for the others, but this history is not theirs to read. 404,
+        # not 403, so an ex-participant cannot probe a ride they left.
+        assert conversation.group_ride_id is not None  # guaranteed by CHECK
+        if not await _joined_in_ride(db, conversation.group_ride_id, viewer.id):
             raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
     else:
         # Direct: a block stops personal messaging in BOTH directions. The
@@ -231,6 +274,26 @@ async def _assert_can_send(db: AsyncSession, conversation: Conversation, viewer:
         peer = await _peer_of(db, conversation.id, viewer.id)
         if peer is not None and await _blocked_either_way(db, viewer.id, peer):
             raise ChatError("CHAT_BLOCKED", "You cannot message this rider.", 403)
+        return
+
+    if conversation.kind == ConversationKind.GROUP_RIDE:
+        # A ride channel accepts messages while the ride is `open` or
+        # `started`. `completed` and `cancelled` are terminal: the ride is over
+        # and the channel becomes history, exactly like an archived team. A
+        # rider who withdrew mid-ride loses write access immediately, because
+        # this re-reads the live roster row inside the lock.
+        assert conversation.group_ride_id is not None  # guaranteed by CHECK
+        ride = (
+            await db.execute(
+                select(GroupRide).where(GroupRide.id == conversation.group_ride_id)
+            )
+        ).scalar_one_or_none()
+        if ride is None:
+            raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
+        if ride.status not in (GroupRideStatus.OPEN, GroupRideStatus.STARTED):
+            raise ChatError("CHAT_GROUP_RIDE_CLOSED", "This ride is no longer active.", 403)
+        if not await _joined_in_ride(db, conversation.group_ride_id, viewer.id):
+            raise ChatError("CHAT_FORBIDDEN", "You cannot post in this ride.", 403)
         return
 
     assert conversation.team_id is not None
@@ -346,11 +409,19 @@ async def _messages_page(
 async def list_conversations(
     db: AsyncSession, viewer: User, page: int, page_size: int
 ) -> tuple[list[dict], int]:
-    """The viewer's inbox: every conversation they hold a member row for.
+    """The viewer's inbox: every conversation they hold a member row for AND
+    still have standing for.
 
     Team channels the viewer has since lost standing for are filtered out at
     READ time rather than listed-then-failed: a 404 inbox row is a worse
-    experience than an absent one, and the count stays honest.
+    experience than an absent one. Phase 9 does the same for ride channels
+    (ADR-16 §5).
+
+    The filter is applied IN SQL rather than in Python so `total` and the page
+    come from the same row set. Filtering after the query, which is what this
+    did for teams before, makes the count disagree with the list — a page of 20
+    showing 3 items while claiming a total of 20 is the kind of thing that reads
+    as data loss to the rider.
     """
     base = (
         select(Conversation)
@@ -359,6 +430,34 @@ async def list_conversations(
             and_(
                 ConversationMember.conversation_id == Conversation.id,
                 ConversationMember.user_id == viewer.id,
+            ),
+        )
+        .where(
+            # A team channel survives only while the viewer still holds a
+            # membership row in that team.
+            or_(
+                Conversation.kind != ConversationKind.TEAM,
+                exists().where(
+                    and_(
+                        TeamMembership.team_id == Conversation.team_id,
+                        TeamMembership.user_id == viewer.id,
+                    )
+                ),
+            ),
+            # A ride channel survives only while the viewer still holds a JOINED
+            # roster row. `conversation_members` is deliberately NOT trusted: a
+            # rider who withdrew an instant ago still has one, and using it would
+            # advertise a channel that 404s on open.
+            or_(
+                Conversation.kind != ConversationKind.GROUP_RIDE,
+                exists().where(
+                    and_(
+                        GroupRideParticipant.group_ride_id == Conversation.group_ride_id,
+                        GroupRideParticipant.user_id == viewer.id,
+                        GroupRideParticipant.status
+                        == GroupRideParticipantStatus.JOINED,
+                    )
+                ),
             ),
         )
         .order_by(Conversation.created_at.desc(), Conversation.id)
@@ -370,10 +469,8 @@ async def list_conversations(
 
     team_ids = [r.team_id for r in rows if r.kind == ConversationKind.TEAM]
     teams = await _teams_for(db, [t for t in team_ids if t is not None])
-    # Live standing decides visibility: a removed rider's channel is not listed.
-    standing: dict[uuid.UUID, TeamMembership | None] = {}
-    for tid in {r.team_id for r in rows if r.kind == ConversationKind.TEAM and r.team_id}:
-        standing[tid] = await _team_membership(db, tid, viewer.id)
+    ride_ids = [r.group_ride_id for r in rows if r.kind == ConversationKind.GROUP_RIDE]
+    rides = await _rides_for(db, [r for r in ride_ids if r is not None])
 
     peers = [
         p
@@ -396,10 +493,6 @@ async def list_conversations(
     items: list[dict] = []
     unread: dict[uuid.UUID, int] = {}
     for row in rows:
-        if row.kind == ConversationKind.TEAM:
-            assert row.team_id is not None
-            if standing.get(row.team_id) is None:
-                continue
         items.append(
             await _conversation_view(
                 db,
@@ -409,6 +502,7 @@ async def list_conversations(
                 identities=identities,
                 member=members.get(row.id),
                 unread=unread,
+                rides=rides,
             )
         )
     return items, total
@@ -433,6 +527,21 @@ async def _teams_for(db: AsyncSession, team_ids: list[uuid.UUID]) -> dict[uuid.U
         return {}
     res = await db.execute(select(Team).where(Team.id.in_(team_ids)))
     return {t.id: t for t in res.scalars()}
+
+
+async def _rides_for(
+    db: AsyncSession, ride_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, GroupRide]:
+    """Ride rows behind a page of inbox entries, in one round trip.
+
+    Only `title` and `status` are ever read, but the whole row comes along: a
+    second, narrower projection for two columns would be a second shape to keep
+    in step with the first.
+    """
+    if not ride_ids:
+        return {}
+    res = await db.execute(select(GroupRide).where(GroupRide.id.in_(ride_ids)))
+    return {r.id: r for r in res.scalars()}
 
 
 async def _last_messages(
@@ -478,7 +587,9 @@ async def _conversation_view(
     identities: dict[uuid.UUID, dict],
     member: ConversationMember | None,
     unread: dict[uuid.UUID, int],
+    rides: dict[uuid.UUID, GroupRide] | None = None,
 ) -> dict:
+    rides = rides or {}
     last_row = (await _last_messages(db, [conversation.id])).get(conversation.id)
     preview = None
     if last_row is not None:
@@ -499,13 +610,24 @@ async def _conversation_view(
     unread[conversation.id] = count
 
     # A "peer" is only meaningful for a DM, which by construction has exactly
-    # one other member. A team channel has many, so querying it here would raise
-    # MultipleResultsFound and 500 the whole view. Phase 8.3 shipped this bug
-    # unexposed because its smoke only ever built two-member teams; a third
-    # member is what makes it fire.
-    is_team = conversation.kind == ConversationKind.TEAM
-    peer = None if is_team else await _peer_of(db, conversation.id, viewer.id)
+    # one other member. GROUP channels (team AND group ride) have many, so
+    # querying a peer here would raise MultipleResultsFound and 500 the whole
+    # view.
+    #
+    # Keyed on DIRECT rather than "not TEAM": Phase 8.3 shipped this as an
+    # `is_team` check, which correctly protected team channels and left group
+    # ride channels exposed. Its smoke only ever built two-member teams, and a
+    # two-rider ride has exactly one peer, so the third member is what makes it
+    # fire — and it fires on GET /chat too, taking the whole inbox down rather
+    # than just the one conversation.
+    is_direct = conversation.kind == ConversationKind.DIRECT
+    peer = await _peer_of(db, conversation.id, viewer.id) if is_direct else None
     team = teams.get(conversation.team_id) if conversation.team_id else None
+    ride = (
+        rides.get(conversation.group_ride_id)
+        if conversation.group_ride_id
+        else None
+    )
     who = identities.get(peer, {}) if peer else {}
     return {
         "id": conversation.id,
@@ -515,6 +637,11 @@ async def _conversation_view(
         "team_handle": team.handle if team else None,
         "team_visibility": team.visibility.value if team else None,
         "team_status": team.status.value if team else None,
+        # Phase 9. A ride channel has no team fields at all, so without these the
+        # inbox row is unlabelled and cannot be linked back to its ride.
+        "group_ride_id": conversation.group_ride_id,
+        "group_ride_title": ride.title if ride else None,
+        "group_ride_status": ride.status.value if ride else None,
         "peer_user_id": peer,
         "peer_username": who.get("username"),
         "peer_display_name": who.get("display_name"),
@@ -726,14 +853,128 @@ async def _open_team_channel(db: AsyncSession, viewer: User, team: Team) -> dict
     )
 
 
+async def group_ride_conversation(
+    db: AsyncSession, viewer: User, ride_id: uuid.UUID
+) -> dict:
+    """The ride's single channel, created on first open (ADR-16 §5).
+
+    Standing is re-derived from a JOINED roster row, so an ex-participant asking
+    for the channel gets the same 404 as a stranger.
+    """
+    ride = (await db.execute(select(GroupRide).where(GroupRide.id == ride_id))).scalar_one_or_none()
+    if ride is None:
+        raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
+    if not await _joined_in_ride(db, ride.id, viewer.id):
+        raise ChatError("CHAT_CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
+
+    return await _open_ride_channel(db, viewer, ride)
+
+
+async def _ride_channel_lock(db: AsyncSession, ride_id: uuid.UUID) -> None:
+    await db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"chatride:{ride_id}"))))
+
+
+async def _open_ride_channel(db: AsyncSession, viewer: User, ride: GroupRide) -> dict:
+    await _ride_channel_lock(db, ride.id)
+    res = await db.execute(
+        select(Conversation).where(
+            Conversation.kind == ConversationKind.GROUP_RIDE,
+            Conversation.group_ride_id == ride.id,
+        )
+    )
+    row = res.scalar_one_or_none()
+    if row is None:
+        now = _now()
+        row = Conversation(
+            kind=ConversationKind.GROUP_RIDE,
+            # NULL by the binding CHECK: a ride channel belongs to a ride, not to
+            # a team. Set deliberately rather than left implicit, so a reader
+            # does not have to check the CHECK to know which is which.
+            team_id=None,
+            group_ride_id=ride.id,
+            created_by_user_id=ride.organizer_user_id,
+            created_at=now,
+            next_seq=1,
+        )
+        db.add(row)
+        await db.flush()
+        db.add(ConversationMember(conversation_id=row.id, user_id=viewer.id, joined_at=now))
+        try:
+            await db.commit()
+        except IntegrityError:
+            # uq_conversations_group_ride_channel caught a concurrent creation.
+            await db.rollback()
+            row = (
+                await db.execute(
+                    select(Conversation).where(
+                        Conversation.kind == ConversationKind.GROUP_RIDE,
+                        Conversation.group_ride_id == ride.id,
+                    )
+                )
+            ).scalar_one()
+            if await _member_row(db, row.id, viewer.id) is None:
+                db.add(
+                    ConversationMember(
+                        conversation_id=row.id, user_id=viewer.id, joined_at=_now()
+                    )
+                )
+                await db.commit()
+        await db.refresh(row)
+        _log("group_ride_channel_opened", group_ride_id=str(ride.id), by=str(viewer.id))
+
+    # Keep the roster current without letting it become the authority: every read
+    # and write re-derives standing from group_ride_participants.
+    await _sync_ride_roster(db, row, ride.id)
+    return await _conversation_view(
+        db,
+        row,
+        viewer,
+        teams={},
+        identities={},
+        member=await _member_row(db, row.id, viewer.id),
+        unread={},
+        rides={ride.id: ride},
+    )
+
+
+async def _sync_ride_roster(
+    db: AsyncSession, conversation: Conversation, ride_id: uuid.UUID
+) -> None:
+    """Add roster rows for riders who joined the ride since the channel opened.
+
+    Best-effort, for the same reason as `_sync_team_roster`: authorization does
+    not depend on this roster for ride channels, so a channel stays usable for a
+    rider who can already see it even if this sync is lost. Rows are only ever
+    ADDED — a rider who withdrew keeps theirs so history stays attributable,
+    exactly as in a team channel, and standing comes from the roster status.
+    """
+    res = await db.execute(
+        select(GroupRideParticipant.user_id).where(
+            GroupRideParticipant.group_ride_id == ride_id,
+            GroupRideParticipant.status == GroupRideParticipantStatus.JOINED,
+        )
+    )
+    wanted = set(res.scalars())
+    res = await db.execute(
+        select(ConversationMember.user_id).where(
+            ConversationMember.conversation_id == conversation.id
+        )
+    )
+    missing = wanted - set(res.scalars())
+    if not missing:
+        return
+    now = _now()
+    for user_id in missing:
+        db.add(ConversationMember(conversation_id=conversation.id, user_id=user_id, joined_at=now))
+    try:
+        await db.commit()
+    except IntegrityError:  # pragma: no cover - roster is advisory
+        await db.rollback()
+
+
 async def _sync_team_roster(
     db: AsyncSession, conversation: Conversation, team_id: uuid.UUID
 ) -> None:
-    """Add roster rows for members who joined since the channel opened.
-
-    Best-effort: a channel remains fully usable for a rider who can already see
-    it, because authorization does not depend on the roster for team channels.
-    """
     res = await db.execute(select(TeamMembership.user_id).where(TeamMembership.team_id == team_id))
     wanted = set(res.scalars())
     res = await db.execute(
@@ -816,6 +1057,7 @@ async def send_message(
     # cannot go stale between here and the write below.
     conversation_kind = conversation.kind
     conversation_team_id = conversation.team_id
+    conversation_group_ride_id = conversation.group_ride_id
 
     row = Message(
         conversation_id=conversation_id,
@@ -869,6 +1111,7 @@ async def send_message(
         conversation_id=conversation_id,
         kind=conversation_kind,
         team_id=conversation_team_id,
+        group_ride_id=conversation_group_ride_id,
         message_id=row.id,
         sender_id=row.sender_user_id,
     )
@@ -881,6 +1124,7 @@ async def _emit_message_notification(
     conversation_id: uuid.UUID,
     kind: ConversationKind,
     team_id: uuid.UUID | None,
+    group_ride_id: uuid.UUID | None,
     message_id: uuid.UUID,
     sender_id: uuid.UUID,
 ) -> None:
@@ -898,6 +1142,10 @@ async def _emit_message_notification(
       would keep notifying someone the team has expelled. A block does NOT apply
       here: the Phase 8.3 policy keeps a team channel open, and a push must not
       become a way around it.
+    * GROUP_RIDE — current JOINED riders of the RIDE, by the same reasoning: a
+      rider who withdrew or was removed keeps their roster row for
+      attributability, and an `invited` rider has not accepted yet (ADR-16 §5).
+      Blocks do not apply here either, for the same reason as a team channel.
 
     Takes plain ids rather than ORM objects on purpose: this runs after a commit
     that has expired the session, so touching an instance attribute here would
@@ -911,6 +1159,7 @@ async def _emit_message_notification(
             conversation_id=conversation_id,
             kind=kind,
             team_id=team_id,
+            group_ride_id=group_ride_id,
             message_id=message_id,
             sender_id=sender_id,
         )

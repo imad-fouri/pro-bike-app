@@ -323,10 +323,35 @@ void main() {
 
     test('an unknown type degrades instead of throwing', () {
       final n = AppNotification.fromJson(
-        notificationJson(type: 'group_ride_invitation'),
+        // Deliberately a Phase 9 sibling that does not exist. Before Phase 9 this
+        // test used `group_ride_invitation`, which was genuinely unknown then and
+        // is a real type now - keeping that input would have turned a meaningful
+        // assertion into a false pass once the enum grew. The property under test
+        // is "a type THIS BUILD has never heard of", so the input has to stay
+        // ahead of the enum rather than behind it.
+        notificationJson(type: 'group_ride_scheduled'),
       );
       // A newer server must not be able to crash an older client.
       expect(n.type, NotificationType.system);
+    });
+
+    test('every Phase 9 group-ride type is recognized, not degraded', () {
+      // The complement of the test above, and the reason it needs one: a type
+      // added to the enum but left out of `parse` would silently render as
+      // `system` and lose its deep link, which is exactly the failure the previous
+      // version of that test would have hidden.
+      for (final wire in const [
+        'group_ride_invitation',
+        'group_ride_accepted',
+        'group_ride_started',
+        'chat_message_group_ride',
+      ]) {
+        expect(
+          AppNotification.fromJson(notificationJson(type: wire)).type,
+          isNot(NotificationType.system),
+          reason: '$wire must parse to its own type',
+        );
+      }
     });
 
     test('a team notification names its team', () {

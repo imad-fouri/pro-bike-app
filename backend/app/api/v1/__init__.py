@@ -4,6 +4,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.bikes import router as bikes_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.coach import router as coach_router
+from app.api.v1.group_rides import router as group_rides_router
 from app.api.v1.health import router as health_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.profile import router as profile_router
@@ -24,6 +25,7 @@ v1.include_router(routes_router)
 v1.include_router(social_router)
 v1.include_router(teams_router)
 v1.include_router(chat_router)
+v1.include_router(group_rides_router)
 v1.include_router(notifications_router)
 v1.include_router(training_router)
 v1.include_router(workout_router)

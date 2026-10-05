@@ -52,6 +52,10 @@ const _allowed = <String, int>{
   '/notifications': 0,
   '/chat': 1,
   '/teams': 1,
+  // Phase 9: ride invitations, acceptances and starts all point at the ride, not
+  // at the chat — the ride is where the decision happens. One prefix covers all
+  // three because they differ in notification TYPE, not in destination.
+  '/group-rides': 1,
   '/users': 1,
 };
 
