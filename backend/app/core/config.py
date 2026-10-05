@@ -1,11 +1,62 @@
 """CycleCoach settings — typed, env-driven, no secrets committed."""
 
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: The shipped development placeholder. Production must never use it.
 _DEV_SECRET_KEY = "change-me-in-production-min-32-chars"
 #: Minimum accepted production secret length (security policy).
 _MIN_SECRET_LENGTH = 32
+#: The shipped development database URL, credentials included. Public in the
+#: repository, so production pointing at it is always a misconfiguration.
+_DEV_DATABASE_URL = "postgresql+asyncpg://cyclecoach:cyclecoach@localhost:5432/cyclecoach"
+#: Environments this application recognises. An unrecognised value is REJECTED
+#: rather than treated as non-production: `ENVIRONMENT=prod` or `Production` would
+#: otherwise silently disable every production check below, which is a fail-OPEN
+#: on the single setting that guards all the others.
+_KNOWN_ENVIRONMENTS = frozenset({"development", "test", "production"})
+#: Longest accepted production access-token lifetime, in minutes.
+#:
+#: Account deletion has to be able to end a session promptly. A multi-day access
+#: token means a deleted account keeps authenticating until it expires, so the
+#: refresh flow — which is revocable — has to be the thing that carries identity.
+_MAX_PRODUCTION_ACCESS_TOKEN_MINUTES = 60
+
+
+#: Hosts that mean "this is a developer's machine".
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def _is_loopback_origin(origin: str) -> bool:
+    """Whether a CORS origin points at a developer's own machine.
+
+    Parsed rather than substring-matched, so `https://localhost.evil.example`
+    is correctly treated as a REMOTE host — a substring check on "localhost"
+    would reject a legitimate domain and, worse, give false confidence about
+    which origins are local.
+    """
+    try:
+        parsed = urlparse(origin if "//" in origin else f"//{origin}")
+    except ValueError:
+        return False
+    return (parsed.hostname or "") in _LOOPBACK_HOSTS
+
+
+class ProductionConfigError(RuntimeError):
+    """Raised when production configuration is unsafe to serve traffic on.
+
+    Carries the full list of problems rather than only the first, because an
+    operator fixing a deployment should see every fault in one restart instead of
+    discovering them one crash at a time.
+    """
+
+    def __init__(self, problems: list[str]) -> None:
+        self.problems = list(problems)
+        detail = "; ".join(self.problems)
+        super().__init__(
+            f"unsafe production configuration ({len(self.problems)} problem(s)): {detail}"
+        )
 
 
 class Settings(BaseSettings):
@@ -124,6 +175,149 @@ class Settings(BaseSettings):
     @property
     def _secret_policy(self) -> str:
         return f"at least {_MIN_SECRET_LENGTH} characters, unique per environment"
+
+    # -----------------------------------------------------------------------
+    # Phase 10 — production configuration gate (WS-B)
+    # -----------------------------------------------------------------------
+
+    def production_config_problems(self) -> list[str]:
+        """Every reason this deployment must not serve production traffic.
+
+        Returns a list rather than raising, so the caller decides when to fail and
+        a test can assert on the full set. **Never includes a secret value** — only
+        the name of the setting and how to fix it. A configuration error lands in
+        a crash log and often in an orchestrator's visible output, so echoing the
+        offending value would move the secret into a place it was never meant to
+        reach.
+
+        `require_production_secrets` deliberately stays separate and unchanged: it
+        is the Phase 8.5 contract with its own tests, and this is the wider gate.
+        """
+        problems: list[str] = []
+
+        # 1. An unrecognised ENVIRONMENT disables every other check, because
+        #    `is_production` compares against the literal "production". A typo
+        #    must fail loudly rather than serve a production database with
+        #    development rules.
+        if self.ENVIRONMENT not in _KNOWN_ENVIRONMENTS:
+            problems.append(
+                f"ENVIRONMENT is {self.ENVIRONMENT!r}, which is not one of "
+                f"{sorted(_KNOWN_ENVIRONMENTS)} — production checks would be "
+                "silently skipped"
+            )
+            return problems
+
+        if not self.is_production:
+            return problems
+
+        # 2. SECRET_KEY. Same three checks as require_production_secrets, repeated
+        #    here so the wide gate is complete on its own.
+        key = self.SECRET_KEY or ""
+        if not key.strip():
+            problems.append("SECRET_KEY is missing")
+        elif key == _DEV_SECRET_KEY:
+            problems.append("SECRET_KEY is the shipped development default")
+        elif len(key) < _MIN_SECRET_LENGTH:
+            problems.append(f"SECRET_KEY is shorter than {_MIN_SECRET_LENGTH} characters")
+
+        # 3. The dev email provider writes message bodies to the log instead of
+        #    sending them. In production that both silently drops password-reset
+        #    and email-verification mail AND puts live reset tokens in the logs.
+        if self.EMAIL_PROVIDER == "dev":
+            problems.append(
+                "EMAIL_PROVIDER is 'dev', which logs message bodies instead of "
+                "sending them — reset and verification links would never arrive "
+                "and their tokens would land in the log"
+            )
+
+        # 4. CORS. A wildcard is rejected by browsers whenever credentials are
+        #    allowed, so it is a misconfiguration even before it is an attack;
+        #    cleartext origins would put bearer tokens on the wire in the clear.
+        origins = self.cors_origin_list()
+        if "*" in origins:
+            problems.append(
+                "CORS_ORIGINS contains '*', which cannot be combined with credentialed requests"
+            )
+        for origin in origins:
+            if _is_loopback_origin(origin):
+                # Checked separately from the cleartext rule below, because the
+                # reason is different: https://localhost is perfectly encrypted
+                # and still a development origin. Allowing it in production lets
+                # any page an operator happens to run locally make credentialed
+                # calls to the live API.
+                problems.append(
+                    f"CORS_ORIGINS entry {origin!r} is a loopback/development "
+                    "origin, which has no place in a production allowlist"
+                )
+            elif not origin.startswith("https://"):
+                problems.append(
+                    f"CORS_ORIGINS entry {origin!r} is not https, so credentials "
+                    "would cross the network in cleartext"
+                )
+
+        # 5. Debug logging in production is how request bodies and tokens end up
+        #    in a log aggregator.
+        if self.LOG_LEVEL.upper() == "DEBUG":
+            problems.append("LOG_LEVEL is DEBUG, which risks logging request content")
+
+        # 6. A production process pointed at the shipped local database is either
+        #    a staging mistake or a deployment that will lose real rides.
+        if self.DATABASE_URL == _DEV_DATABASE_URL:
+            problems.append(
+                "DATABASE_URL is the shipped development default (credentials "
+                "included, and public in this repository)"
+            )
+
+        # 7. "Enabled" with no provider is a contradiction that silently means
+        #    "disabled": an operator who believes AI is on would be wrong.
+        if self.AI_ENABLED and self.AI_PROVIDER == "none":
+            problems.append("AI_ENABLED is true but AI_PROVIDER is 'none'")
+        if self.AI_ENABLED and not self.AI_API_KEY.strip():
+            problems.append("AI_ENABLED is true but AI_API_KEY is empty")
+
+        if self.PUSH_ENABLED and self.PUSH_PROVIDER == "none":
+            problems.append("PUSH_ENABLED is true but PUSH_PROVIDER is 'none'")
+
+        # 8. Redis holds consented live rider positions. An unauthenticated
+        #    connection to a REMOTE Redis would expose them to anyone who can
+        #    reach the port. A localhost sidecar needs no credential and stays
+        #    allowed.
+        if self._redis_is_remote_without_auth():
+            problems.append(
+                "REDIS_URL points at a remote host with no password, and Redis "
+                "holds live rider positions"
+            )
+
+        # 9. A long-lived access token outlives account deletion. See the
+        #    constant for the reasoning.
+        if self.ACCESS_TOKEN_MINUTES > _MAX_PRODUCTION_ACCESS_TOKEN_MINUTES:
+            problems.append(
+                f"ACCESS_TOKEN_MINUTES is {self.ACCESS_TOKEN_MINUTES}, above the "
+                f"production maximum of {_MAX_PRODUCTION_ACCESS_TOKEN_MINUTES} — a "
+                "deleted account would keep authenticating until it expires"
+            )
+
+        return problems
+
+    def _redis_is_remote_without_auth(self) -> bool:
+        try:
+            parsed = urlparse(self.REDIS_URL)
+        except ValueError:
+            return False
+        host = parsed.hostname or ""
+        if not host or host in _LOOPBACK_HOSTS:
+            return False
+        return not parsed.password
+
+    def validate_production(self) -> None:
+        """Fail closed before serving traffic.
+
+        A no-op outside production, so tests and local development need no
+        ceremony. Raises [ProductionConfigError] listing EVERY problem found.
+        """
+        problems = self.production_config_problems()
+        if problems:
+            raise ProductionConfigError(problems)
 
 
 settings = Settings()

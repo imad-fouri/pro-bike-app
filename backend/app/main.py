@@ -13,9 +13,12 @@ setup_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 
 
 def create_app() -> FastAPI:
-    # Fail closed before serving anything: a production process must never
-    # sign tokens with a missing, placeholder, or short SECRET_KEY.
-    settings.require_production_secrets()
+    # Fail closed before serving anything. Phase 10 widened this from the
+    # SECRET_KEY-only check to the full production gate: an unsafe default
+    # anywhere (dev email provider, cleartext CORS, DEBUG logging, the shipped
+    # database URL, an unauthenticated remote Redis holding live positions) now
+    # stops the process instead of serving production traffic.
+    settings.validate_production()
     app = FastAPI(
         title="CycleCoach API",
         description="Worldwide cycling platform — Phase 1 foundation.",
