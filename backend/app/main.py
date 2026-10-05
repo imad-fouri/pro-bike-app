@@ -19,12 +19,22 @@ def create_app() -> FastAPI:
     # database URL, an unauthenticated remote Redis holding live positions) now
     # stops the process instead of serving production traffic.
     settings.validate_production()
+    # Phase 10 security audit: `/openapi.json` is the complete route table —
+    # every endpoint, parameter and schema — and needs no authentication. Left on
+    # in production it hands an attacker the map of the API for free, including
+    # the Phase 9 group-ride and location surfaces whose safety depends on nobody
+    # knowing the shape in advance.
+    #
+    # Development and test keep both, because the contract tests read the schema
+    # and losing it locally would be a real cost.
+    is_production = settings.is_production
     app = FastAPI(
         title="CycleCoach API",
         description="Worldwide cycling platform — Phase 1 foundation.",
         version=settings.APP_VERSION,
-        docs_url="/docs",
-        openapi_url="/openapi.json",
+        docs_url=None if is_production else "/docs",
+        redoc_url=None if is_production else "/redoc",
+        openapi_url=None if is_production else "/openapi.json",
     )
     app.add_middleware(
         CORSMiddleware,
@@ -47,6 +57,9 @@ def create_app() -> FastAPI:
         shape = raw.replace("-", "").replace("_", "")
         incoming = raw if shape.isascii() and shape.isalnum() else ""
         rid = new_request_id(incoming or None)
+        # Published on the request as well as the response, so the unhandled-exception
+        # handler can put the same id on a 500 — see app/core/errors.py.
+        request.state.request_id = rid
         response = await call_next(request)
         response.headers["X-Request-ID"] = rid
         response.headers["X-Content-Type-Options"] = "nosniff"
