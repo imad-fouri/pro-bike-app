@@ -1,7 +1,8 @@
 # Phase 10 — WS-O: Observability, Dependency & Release Audit
 
-Status: **complete pending GitHub Actions**
-Branch: `master` · Baseline: `318499f` · Date: 2026-10-06
+Status: **PASS**
+Run: [`37407655994`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37407655994) · backend **success** · mobile **success**
+Branch: `master` · Commit: `4473255` · Baseline: `318499f` · Date: 2026-10-06
 
 ---
 
@@ -251,11 +252,22 @@ Carried forward deliberately, not resolved here:
 
 ## 8. Final status
 
-This workstream is complete locally. It is **not** claimed as `PASS` until
-GitHub Actions reports green on both `backend` and `mobile` for the pushed
-commit — CI is the authority, and this machine's `WinError 64` behaviour is not
-representative of it.
+**`WS-O STATUS: PASS`**
 
-The historical run `37363564252` (backend SUCCESS / mobile CANCELLED) remains
-**pending re-verification** as a historical record. The new run's mobile job
-covers the current `master`; it does not retroactively change that record.
+CI is the authority, and it is green. Run `37407655994`, on commit `4473255`:
+
+| Job | Conclusion | Notes |
+|---|---|---|
+| `backend` | **success** | The gate is a single `run:` block, so `ruff check`, `ruff format --check`, `mypy`, `alembic upgrade head`, **`pytest -q`** and `alembic downgrade -1 && alembic upgrade head` all passed in one step |
+| `mobile` | **success** | `flutter pub get`, `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test` all passed |
+
+This is the meaningful outcome of the work: **the full backend suite passed
+end-to-end on Linux**, including all 87 WS-O tests. It confirms §5.2's
+attribution — the `WinError 64` failures in §5.2 are a fault of this Windows
+machine, not defects in the code. CI cannot report an individual test count
+without authenticated log access, so the specific pass count is not quoted here;
+the step conclusion is the evidence.
+
+The historical run `37363564252` (backend success / mobile cancelled) is left
+untouched as a historical record. The mobile job of run `37407655994` covers the
+current `master`; it does not retroactively change that earlier run.
