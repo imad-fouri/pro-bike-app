@@ -19,6 +19,32 @@ _SWEEP_INTERVAL_S = 1.0
 _buckets: dict[str, tuple[list[float], int]] = {}
 
 
+def _count_hit(key: str) -> None:
+    """Count a refused request, per ENDPOINT and never per key.
+
+    The limiter key contains a user id or a client IP — `auth:login:203.0.113.9`,
+    `coach:<uuid>`. Recording that would turn an abuse-resistance mechanism into a
+    log of who is being rate-limited, which is both an identity disclosure and an
+    unbounded time series. So only the leading segment — the endpoint family — is
+    used, and only as a count.
+
+    Never raises: a metrics failure must not turn a 429 into a 500.
+    """
+    try:
+        from app.core.metrics import record_rate_limit
+
+        endpoint = key.split(":", 1)[0] if ":" in key else "unknown"
+        record_rate_limit(endpoint)
+    except Exception as exc:  # noqa: BLE001 - never break a 429 over a metric
+        # `exc` is never logged by value: a metrics refusal message could echo a
+        # label, and a label is where an identity would first appear.
+        import logging
+
+        logging.getLogger("cyclecoach").warning(
+            "metrics_record_failed", extra={"error_type": type(exc).__name__}
+        )
+
+
 def _reap(now: float) -> None:
     """Drop keys with no in-window hits (under their OWN window); cap total."""
     global _sweep_at
@@ -46,6 +72,7 @@ def allow(key: str, limit: int = 60, window_s: int = 60) -> bool:
     hits = [t for t in hits if now - t < window_s]
     if len(hits) >= limit:
         _buckets[key] = (hits, window_s)
+        _count_hit(key)
         return False
     hits.append(now)
     _buckets[key] = (hits, window_s)

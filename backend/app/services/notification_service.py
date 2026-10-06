@@ -79,10 +79,36 @@ def _rows_affected(result: object) -> int:
     """Rows changed by an UPDATE/DELETE, or 0.
 
     SQLAlchemy types `Result` without `rowcount`, but an UPDATE/DELETE always
-    returns a `CursorResult`. Centralising the cast keeps the intent readable at
-    the call site instead of repeating a cast four times.
+    returns a `CursorResult`. Centralising the cast keeps the intent readable at the
+    call site instead of repeating a cast four times.
     """
     return int(getattr(result, "rowcount", 0) or 0)
+
+
+def _count(notification_type: str, outcome: str, amount: int = 1) -> None:
+    """Count `amount` notification outcomes. Never raises into the caller.
+
+    The only label is the notification TYPE, already a closed enum, and a coarse
+    outcome. The params are never counted: they carry another rider's display name
+    (see `_actor_params`), and `docs/privacy-data.md` treats a display name as
+    personal data. A metric registry is a log that never expires — the wrong place
+    for that.
+
+    `amount=0` records nothing at all. A batch that created 3 of 5 rows should show
+    `created=3` and `deduplicated=2`, not `created=5` and `deduplicated=0` with the
+    arithmetic left to whoever reads the graph.
+    """
+    if amount <= 0:
+        return
+    try:
+        from app.core.metrics import record_notification
+
+        record_notification(notification_type, outcome=outcome, amount=amount)
+    except Exception as exc:  # noqa: BLE001 - never fail a notify over a metric
+        log.warning(
+            "metrics_record_failed",
+            extra={"error_type": type(exc).__name__, "notification_type": notification_type},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -584,8 +610,9 @@ async def notify(
         return []
 
     created: list[Notification] = []
+    deduped = 0
     for recipient_id in dict.fromkeys(recipient_ids):  # de-dupe, keep order
-        row = await _create_one(
+        row, was_created = await _create_one(
             db,
             recipient_id=recipient_id,
             type_=type_,
@@ -596,16 +623,27 @@ async def notify(
             deep_link=deep_link,
             dedupe_key=dedupe_key,
         )
-        if row is not None:
-            created.append(row)
+        if row is None:
+            continue
+        created.append(row)
+        # Tracked explicitly rather than inferred from `len(recipients) -
+        # len(created)`: `_create_one` returns the EXISTING row on a dedupe, so a
+        # deduped retry and a fresh send are the same length. Counting the return
+        # as a creation is exactly the double-notification this index prevents, and
+        # it would put that lie on a dashboard nobody would know to distrust.
+        if not was_created:
+            deduped += 1
 
     if created:
         _log(
             "created",
             type_=type_.value,
             recipients=len(created),
-            deduped=len(recipient_ids) - len(created),
+            deduped=deduped,
         )
+    if created or deduped:
+        _count(type_.value, "created", len(created) - deduped)
+        _count(type_.value, "deduplicated", deduped)
     if deliver and created:
         await _deliver(db, created)
     return created
@@ -622,8 +660,13 @@ async def _create_one(
     params: dict,
     deep_link: str | None,
     dedupe_key: str | None,
-) -> Notification | None:
+) -> tuple[Notification | None, bool]:
     """Insert one row, or return the existing one for this dedupe key.
+
+    Returns `(row, was_created)`. The flag is not cosmetic: every return path
+    hands back a `Notification`, so without it a caller cannot tell a fresh insert
+    from a re-read of the winner's row, and a deduped retry becomes
+    indistinguishable from a second send.
 
     The `IntegrityError` path is the same shape as `chat_service.send_message`
     and `social_service.send_request`: the unique index is the arbiter, and a
@@ -641,7 +684,7 @@ async def _create_one(
         existing = await db.execute(select(Notification).where(Notification.dedupe_key == key))
         prior = existing.scalar_one_or_none()
         if prior is not None:
-            return prior
+            return prior, False
 
     row = Notification(
         recipient_user_id=recipient_id,
@@ -661,11 +704,13 @@ async def _create_one(
     except IntegrityError:
         await db.rollback()
         if key is None:
-            return None
+            return None, False
         winner = await db.execute(select(Notification).where(Notification.dedupe_key == key))
-        return winner.scalar_one_or_none()
+        # Lost the race: the row exists, but it is not OURS. `False` so the caller
+        # counts it as deduplicated rather than as a creation it did not perform.
+        return winner.scalar_one_or_none(), False
     await db.refresh(row)
-    return row
+    return row, True
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +733,11 @@ async def _deliver(db: AsyncSession, rows: list[Notification]) -> None:
     """
     if not _push_configured():
         _log("deliver_skipped", reason="push_not_configured", rows=len(rows))
+        # Counted per row, against each row's OWN type: a batch can mix types, and
+        # attributing the whole batch to the first row's type would put a lie in a
+        # dashboard that is otherwise trustworthy.
+        for row in rows:
+            _count(row.type.value, "skipped_push_not_configured")
         return
 
     if len(rows) > settings.PUSH_INLINE_FANOUT_LIMIT:
@@ -699,6 +749,8 @@ async def _deliver(db: AsyncSession, rows: list[Notification]) -> None:
             rows=len(rows),
             limit=settings.PUSH_INLINE_FANOUT_LIMIT,
         )
+        for row in rows:
+            _count(row.type.value, "skipped_fan_out_above_inline_limit")
         return
 
     provider = push_provider.get_provider()
@@ -706,6 +758,7 @@ async def _deliver(db: AsyncSession, rows: list[Notification]) -> None:
         targets = await _targets_for(db, row.recipient_user_id)
         if not targets:
             _log("deliver_no_targets", notification_id=str(row.id))
+            _count(row.type.value, "deliver_no_targets")
             continue
         message = PushMessage(
             notification_id=str(row.id),
@@ -724,8 +777,13 @@ async def _deliver(db: AsyncSession, rows: list[Notification]) -> None:
                 provider=getattr(provider, "name", "?"),
                 error_category=type(exc).__name__,
             )
+            # A provider outage is the failure mode nobody notices until a rider
+            # reports a missing push, so it is counted per row rather than logged
+            # once per batch.
+            _count(row.type.value, "deliver_failed")
             continue
         await _apply_device_results(db, result)
+        _count(row.type.value, "delivered")
 
 
 def _push_configured() -> bool:

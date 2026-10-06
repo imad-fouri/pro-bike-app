@@ -303,13 +303,14 @@ def _log(
     cost = _estimate_cost(usage)
     if cost:
         _daily_spend_usd[_today()] = _spend_today() + cost
+    latency_ms = int((time.monotonic() - started) * 1000) if started else 0
     metadata: dict = {
         "provider": provider_name,
         "model": model or settings.AI_MODEL,
         "intent": intent.value,
         "prompt_version": prompts.PROMPT_VERSIONS[intent],
         "outcome": outcome,
-        "latency_ms": int((time.monotonic() - started) * 1000) if started else 0,
+        "latency_ms": latency_ms,
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
         "cost_usd": float(cost),
@@ -317,3 +318,18 @@ def _log(
     if extra:
         metadata.update(extra)
     log.info("coach", extra=redact(metadata))
+    # Counted with the same four bounded dimensions the log line carries. No prompt,
+    # no response, no context, no token VALUES — usage stays in the log, because a
+    # token count aggregated into a metric is a content-volume fingerprint.
+    try:
+        from app.core.metrics import record_ai_outcome
+
+        record_ai_outcome(
+            outcome=outcome,
+            provider=provider_name,
+            intent=intent.value,
+            latency_ms=latency_ms,
+        )
+    except Exception as exc:  # noqa: BLE001 - never break a reply over a metric
+        # Type only: a metrics failure message could quote a label value.
+        log.warning("metrics_record_failed", extra={"error_type": type(exc).__name__})

@@ -82,6 +82,26 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _count(outcome: str) -> None:
+    """Count one live-location operation. Never raises into the request path.
+
+    A COUNT and nothing else. Deliberately no ride id, no user id, no accuracy and
+    no coordinate: the label here is an outcome, because a metrics label is a
+    durable store and `docs/privacy-data.md` classes a live position as the most
+    sensitive field in the schema. A counter that answered "who is sharing where"
+    would be a copy of the Redis hash with worse access control.
+    """
+    try:
+        from app.core.metrics import record_location_event
+
+        record_location_event(outcome)
+    except Exception as exc:  # noqa: BLE001 - never fail a location op over a metric
+        log.warning(
+            "metrics_record_failed",
+            extra={"error_type": type(exc).__name__},
+        )
+
+
 # NOTE ON THE `cast` CALLS BELOW. redis-py 5.3 declares every
 # `redis.asyncio.Redis` method as returning `Union[Awaitable[T], T]` so that one
 # class can serve the sync and the async API. `get_redis()` always hands back the
@@ -172,8 +192,10 @@ async def publish(
             "ride_location_publish_failed",
             extra={"group_ride_id": str(ride.id), "error_type": type(exc).__name__},
         )
+        _count("publish_failed")
         raise RideError("LOCATION_UNAVAILABLE", "Location sharing is unavailable.", 503) from None
 
+    _count("published")
     # Coordinates deliberately absent from the log line and the return value.
     log.info("ride_location_published", extra={"group_ride_id": str(ride.id)})
     return {"status": "sharing", "expires_in_seconds": LOCATION_TTL_SECONDS}
@@ -199,7 +221,9 @@ async def stop_sharing(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> di
             "ride_location_stop_failed",
             extra={"group_ride_id": str(ride.id), "error_type": type(exc).__name__},
         )
+        _count("stop_failed")
         raise RideError("LOCATION_UNAVAILABLE", "Location sharing is unavailable.", 503) from None
+    _count("stopped")
     log.info("ride_location_stopped", extra={"group_ride_id": str(ride.id)})
     return {"status": "stopped"}
 
@@ -223,7 +247,10 @@ async def list_locations(db: AsyncSession, viewer: User, ride_id: uuid.UUID) -> 
             "ride_location_read_failed",
             extra={"group_ride_id": str(ride.id), "error_type": type(exc).__name__},
         )
+        _count("read_failed")
         raise RideError("LOCATION_UNAVAILABLE", "Location sharing is unavailable.", 503) from None
+
+    _count("read")
 
     # The joined roster is re-read from PostgreSQL rather than trusted from the
     # hash: the hash says who last published, this says who is actually allowed to

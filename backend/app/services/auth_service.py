@@ -92,15 +92,18 @@ async def login(db: AsyncSession, data: LoginIn) -> tuple[User, str, str]:
     if user is None or not security.verify_password(data.password, user.password_hash):
         # Deliberately no identity: an observer must not learn which half failed.
         log.info("auth.login_failed")
+        _count_auth("login_failed")
         raise AuthError("INVALID_CREDENTIALS", "Invalid email or password.", 401)
     if user.status != UserStatus.ACTIVE or user.deleted_at is not None:
         log.info("auth.login_inactive", extra={"user_id": str(user.id)})
+        _count_auth("login_inactive")
         raise AuthError("ACCOUNT_INACTIVE", "This account is not active.", 403)
     user.last_login_at = _now()
     user.updated_at = _now()
     refresh, _ = await _new_session(db, user, data.device_label)
     access, _ = security.create_access_token(str(user.id))
     await db.commit()
+    _count_auth("login_success")
     return user, access, refresh
 
 
@@ -116,6 +119,7 @@ async def refresh(db: AsyncSession, presented: str) -> tuple[str, str]:
     session = res.scalar_one_or_none()
     if session is None:
         log.info("auth.refresh_invalid")
+        _count_auth("refresh_failed")
         raise AuthError("INVALID_REFRESH", "Invalid refresh token.", 401)
     if session.revoked_at is not None:
         # Compromise containment: burn the family, force re-login everywhere.
@@ -129,8 +133,13 @@ async def refresh(db: AsyncSession, presented: str) -> tuple[str, str]:
             "auth.refresh_reused",
             extra={"family_id": str(session.family_id), "user_id": str(session.user_id)},
         )
+        # The security-relevant event in this module: reuse of a rotated token means
+        # a copy exists somewhere, and the family has just been burned. Worth an
+        # alert threshold, which is why it is counted distinctly.
+        _count_auth("refresh_reuse_detected")
         raise AuthError("REFRESH_REUSED", "Session compromised. Please log in again.", 401)
     if session.expires_at < _now():
+        _count_auth("refresh_expired")
         raise AuthError("REFRESH_EXPIRED", "Session expired. Please log in again.", 401)
     user = await db.get(User, session.user_id)
     if user is None or user.status != UserStatus.ACTIVE or user.deleted_at is not None:
@@ -150,6 +159,7 @@ async def refresh(db: AsyncSession, presented: str) -> tuple[str, str]:
     session.replaced_by = new_session.id
     await db.commit()
     access, _ = security.create_access_token(str(user.id))
+    _count_auth("refresh_success")
     return access, new_token
 
 
@@ -161,6 +171,24 @@ async def logout(db: AsyncSession, presented: str) -> None:
     if session is not None and session.revoked_at is None:
         session.revoked_at = _now()
         await db.commit()
+    _count_auth("logout")
+
+
+def _count_auth(event: str) -> None:
+    """Count an auth event. Never raises.
+
+    The event vocabulary is closed and carries no identity: a failed login cannot be
+    attributed without turning the log into a record of who is being attacked, and
+    a `user_id` label here would be an unbounded series per rider.
+    """
+    try:
+        from app.core.metrics import record_auth_event
+
+        record_auth_event(event)
+    except Exception as exc:  # noqa: BLE001 - never break auth over a metric
+        # Only the exception TYPE. A metrics failure message could quote a label,
+        # and the label is where an identity would first appear.
+        log.warning("metrics_record_failed", extra={"error_type": type(exc).__name__})
 
 
 async def logout_all(db: AsyncSession, user: User) -> int:
@@ -175,11 +203,18 @@ async def logout_all(db: AsyncSession, user: User) -> int:
         count += 1
     await db.commit()
     log.info("auth.logout_all", extra={"user_id": str(user.id), "revoked": count})
+    _count_auth("logout_all")
     return count
 
 
 async def request_password_reset(db: AsyncSession, email: str) -> None:
     """Anti-enumeration: identical behavior whether or not the email exists."""
+    # Counted BEFORE the lookup, and unconditionally. Counting it only when the
+    # address resolves would make the counter an account-existence oracle: an
+    # attacker enumerating addresses would learn which are registered from a
+    # metric that operators can read and exporters can scrape. The request count is
+    # the operationally useful number anyway; how many actually sent mail is not.
+    _count_auth("password_reset_requested")
     user = await _get_user_by_email(db, email)
     if user is None:
         return
@@ -210,6 +245,10 @@ async def confirm_password_reset(db: AsyncSession, token: str, new_password: str
     )
     row = res.scalar_one_or_none()
     if row is None or row.used_at is not None or row.expires_at < _now():
+        # A single outcome for all three refusals. Distinguishing "no such token"
+        # from "already used" here would tell an attacker holding a leaked token
+        # whether it had already been redeemed, so the counter must not either.
+        _count_auth("password_reset_failed")
         raise AuthError("INVALID_RESET_TOKEN", "Invalid or expired reset token.", 400)
     if (msg := security.validate_password_strength(new_password)) is not None:
         raise AuthError("WEAK_PASSWORD", msg, 422)
@@ -236,6 +275,7 @@ async def confirm_password_reset(db: AsyncSession, token: str, new_password: str
     for s in fam.scalars():
         s.revoked_at = _now()
     await db.commit()
+    _count_auth("password_reset_completed")
 
 
 async def issue_email_verification(db: AsyncSession, user: User) -> None:

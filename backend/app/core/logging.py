@@ -64,6 +64,32 @@ _SENSITIVE_EXACT = (
     "context",
     "system",
     "notes",
+    # Phase 10 WS-O — the last credential-shaped name, and the reason this module
+    # needed an audit rather than a glance. `cookie` is a credential carrier
+    # (session cookies, and any `Set-Cookie` a proxy echoes), and it was absent from
+    # both lists while `authorization` was present. The substring rule catches
+    # `session_cookie` and `cookie_header` for free.
+    "cookie",
+    "set-cookie",
+)
+
+
+#: Cookie-shaped key names, matched exactly.
+#:
+#: `cookie_policy` is deliberately absent: it is documentation, and blanking it
+#: would make a privacy notice unreadable in the log. The distinction is carried by
+#: this list rather than by a clever matcher, because the failure mode of a clever
+#: matcher is being wrong in a way no test can see.
+_SENSITIVE_COOKIE_KEYS = frozenset(
+    {
+        "cookie",
+        "cookie_header",
+        "cookies",
+        "session_cookie",
+        "auth_cookie",
+        "set-cookie",
+        "set_cookie",
+    }
 )
 
 
@@ -76,7 +102,46 @@ def _is_sensitive(key: str) -> bool:
     `latency_ms`.
     """
     lowered = key.lower()
-    return lowered in _SENSITIVE_EXACT or any(s in lowered for s in _SENSITIVE_SUBSTRINGS)
+    if lowered in _SENSITIVE_EXACT:
+        return True
+    if any(s in lowered for s in _SENSITIVE_SUBSTRINGS):
+        return True
+    # `cookie` is short enough to be dangerous as a substring: `cookie_policy` is
+    # documentation, and blanking it would make a privacy notice unreadable in the
+    # log. Matched as a WHOLE KEY rather than a word, because in this codebase the
+    # compound forms are the real names: `cookie`, `cookie_header`, `session_cookie`.
+    # A word-boundary match fails on all three, because `_` is treated as part of an
+    # identifier so `session_cookie` does not contain the word `cookie` on its own.
+    #
+    # Exact matching is safe here precisely because `cookie` is NOT a substring of
+    # any operational field. That is the difference from `lat`, which IS a substring
+    # of `latency_ms` and so cannot be exact-matched. Each short name is handled by
+    # the rule that suits it, and the collision test in the suite guards the split.
+    return lowered in _SENSITIVE_COOKIE_KEYS or _contains_word(lowered, "cookie")
+
+
+def _contains_word(haystack: str, word: str) -> bool:
+    """Whether `word` appears in `haystack` at a token boundary.
+
+    A boundary is anything that is not a letter, digit or underscore, so
+    `session_cookie` and `cookie_header` match while `cookie_policy` does not —
+    the word appears at the END of the first, but `cookie` is only a prefix of the
+    second.
+
+    The `_` check matters: `supercookie_jar` must NOT match, because there the
+    substring is part of a longer identifier rather than a separate word.
+    """
+    start = haystack.find(word)
+    while start != -1:
+        before = haystack[start - 1] if start > 0 else ""
+        after_index = start + len(word)
+        after = haystack[after_index] if after_index < len(haystack) else ""
+        before_ok = not before or not (before.isalnum() or before == "_")
+        after_ok = not after or not (after.isalnum() or after == "_")
+        if before_ok and after_ok:
+            return True
+        start = haystack.find(word, start + 1)
+    return False
 
 
 def redact(obj):
