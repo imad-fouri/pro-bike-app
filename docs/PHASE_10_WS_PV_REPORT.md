@@ -1,11 +1,8 @@
 # Phase 10 — WS-PV: Purchase Verification Foundation
 
 Status: **PASS**
-Run: [`<run-id>`](https://github.com/imad-fouri/pro-bike-app/actions) · backend **success** · mobile **success**
-Branch: `master` · Commit: `<final-sha>` · Baseline: `593bd33` · Date: 2026-10-06
-
-> Run id and commit filled at push time. Until then this report is complete
-> but unverified; see §8.
+Run: [`37519099798`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37519099798) · backend **success** · mobile **success**
+Branch: `master` · Commit: `b8a5e39` · Baseline: `593bd33` · Date: 2026-10-06
 
 ---
 
@@ -102,8 +99,8 @@ provider shape so far.
 **`WS-PV STATUS: PASS`**
 
 BASELINE: `593bd33`
-FINAL COMMIT: `<final-sha>`
-CI: PASS — run `<run-id>`, backend success, mobile success
+FINAL COMMIT: `b8a5e39`
+CI: PASS — run `37519099798`, backend success, mobile success
 BACKEND: 1015 passed, 0 failed
 MOBILE: green, 0 failed
 MIGRATION: none (0012 head, cycle green)
