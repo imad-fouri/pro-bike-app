@@ -1,11 +1,8 @@
 # Phase 10 — WS-SM: Store Monetization Readiness
 
 Status: **PASS**
-Run: [`<run-id>`](https://github.com/imad-fouri/pro-bike-app/actions) · backend **success** · mobile **success**
-Branch: `master` · Commit: `<final-sha>` · Baseline: `bf568b4` · Date: 2026-10-06
-
-> Run id and commit filled at push time. Until then this report is complete
-> but unverified; see §8.
+Run: [`37481710545`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37481710545) · backend **success** · mobile **success**
+Branch: `master` · Commit: `70d7833` · Baseline: `bf568b4` · Date: 2026-10-06
 
 ---
 
@@ -104,8 +101,8 @@ quota question.
 **`WS-SM STATUS: PASS`**
 
 BASELINE: `bf568b4`
-FINAL COMMIT: `<final-sha>`
-CI: PASS — run `<run-id>`, backend success, mobile success
+FINAL COMMIT: `70d7833`
+CI: PASS — run `37481710545`, backend success, mobile success
 BACKEND: 985 passed, 0 failed
 MOBILE: green, 0 failed
 MIGRATION: none (0012 head, cycle green)
