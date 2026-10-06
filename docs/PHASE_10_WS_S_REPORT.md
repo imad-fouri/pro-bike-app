@@ -1,11 +1,8 @@
 # Phase 10 — WS-S: Subscription & Entitlement Foundation
 
 Status: **PASS**
-Run: [`<run-id>`](https://github.com/imad-fouri/pro-bike-app/actions) · backend **success** · mobile **success**
-Branch: `master` · Commit: `<final-sha>` · Baseline: `05b758b` · Date: 2026-10-06
-
-> The run id and commit above are filled at push time. Until then this report
-> is complete but unverified; see §8.
+Run: [`37421035914`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37421035914) · backend **success** · mobile **success**
+Branch: `master` · Commit: `19b5277` · Baseline: `05b758b` · Date: 2026-10-06
 
 ---
 
@@ -198,8 +195,8 @@ logout cache clear, account-switch replacement, fresh-reuse/stale-refresh,
 **`WS-S STATUS: PASS`**
 
 BASELINE: `05b758b`
-FINAL COMMIT: `<final-sha>`
-CI: PASS — run `<run-id>`, backend success, mobile success
+FINAL COMMIT: `19b5277`
+CI: PASS — run `37421035914`, backend success, mobile success
 BACKEND: 963 passed, 0 failed
 MOBILE: 603 passed, 0 failed
 MIGRATION: `0012_subscriptions` (single head, down/up green)
