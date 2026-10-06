@@ -39,6 +39,16 @@ from app.models.social import (  # noqa: F401
     SocialProfile,
     UserBlock,
 )
+from app.models.subscription import (  # noqa: F401
+    Entitlement,
+    EntitlementSource,
+    EntitlementStatus,
+    Feature,
+    Plan,
+    Subscription,
+    SubscriptionProvider,
+    SubscriptionStatus,
+)
 from app.models.team import (  # noqa: F401
     Team,
     TeamInvitation,

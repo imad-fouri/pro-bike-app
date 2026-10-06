@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/l10n/app_localizations.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/pro_locked_feature.dart';
+import '../../subscriptions/domain/entitlement.dart';
 import '../../training/domain/training_models.dart';
 import '../../training/domain/training_units.dart';
 import '../../training/presentation/training_providers.dart';
@@ -449,11 +452,16 @@ class _Answer extends ConsumerWidget {
         padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
         child: Center(child: CircularProgressIndicator()),
       ),
-      error: (e, _) => Text(
-        t.get('coach.error'),
-        key: const Key('coach.answer.error'),
-        style: const TextStyle(color: AppColors.zone4),
-      ),
+      // A 403 with ENTITLEMENT_REQUIRED is not a generic failure: the server
+      // has authoritatively said this rider's plan does not include the Coach.
+      // The lock screen explains that fact; it does not re-decide it.
+      error: (e, _) => e is ApiException && e.code == 'ENTITLEMENT_REQUIRED'
+          ? const ProLockedFeature(feature: EntitlementFeature.aiCoach)
+          : Text(
+              t.get('coach.error'),
+              key: const Key('coach.answer.error'),
+              style: const TextStyle(color: AppColors.zone4),
+            ),
       data: (message) => message == null
           ? Text(
               t.get('coach.empty'),

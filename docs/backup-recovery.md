@@ -15,7 +15,7 @@ The recovery question has exactly one real answer, and it is short:
 
 | Store | Durable | Backup | Rationale |
 |---|---|---|---|
-| **PostgreSQL 16** — 33 tables | Yes | **Required** | The only system of record. Losing it loses accounts, rides, routes, training history, chat and social graphs. No reconstruction path exists. |
+| **PostgreSQL 16** — 35 tables | Yes | **Required** | The only system of record. Losing it loses accounts, rides, routes, training history, chat and social graphs. No reconstruction path exists. |
 | **Redis 7** — live positions | No | **Excluded, deliberately** | See §3. |
 | Application logs (stdout) | Depends on the host | **PENDING** | Not yet shipped to durable storage. Needed for incident response, not for data recovery. |
 | GPX uploads | N/A | N/A | Never stored — parsed and discarded. |

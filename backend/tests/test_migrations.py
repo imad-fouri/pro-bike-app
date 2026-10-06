@@ -37,6 +37,7 @@ PHASE84 = {"push_devices", "notifications"}
 # lives in Redis with a TTL (ADR-16 §6). If a `group_ride_locations` table ever
 # appears here, the privacy decision was quietly reversed.
 PHASE89 = {"group_rides", "group_ride_participants"}
+PHASE10 = {"subscriptions", "entitlements"}
 BASE = {
     "users",
     "user_profiles",
@@ -47,8 +48,8 @@ BASE = {
     "rides",
     "ride_points",
 }
-EXPECTED = BASE | PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89
-ALL_PHASES = PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89
+EXPECTED = BASE | PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10
+ALL_PHASES = PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10
 
 SENSOR_COLUMNS = {"power_w", "hr_bpm", "cadence_rpm"}
 
@@ -80,6 +81,34 @@ GROUP_RIDE_COLUMNS = {
     },
     # `responded_at` is what separates `invited` from every answered state.
     "group_ride_participants": {"role", "status", "invited_by_user_id", "responded_at"},
+}
+
+# WS-S columns that carry a load-bearing invariant. Commercial state and
+# authorization state are separate tables; provider identifiers exist only for
+# idempotent event handling, never as authorization labels.
+SUBSCRIPTION_COLUMNS = {
+    "subscriptions": {
+        "user_id",
+        "provider",
+        "provider_subscription_id",
+        "plan",
+        "status",
+        "started_at",
+        "current_period_start",
+        "current_period_end",
+        "cancel_at_period_end",
+        "last_provider_event_id",
+        "last_provider_event_at",
+    },
+    "entitlements": {
+        "user_id",
+        "feature",
+        "status",
+        "source",
+        "source_subscription_id",
+        "starts_at",
+        "expires_at",
+    },
 }
 
 
@@ -267,10 +296,41 @@ async def test_migration_upgrade_downgrade_upgrade():
     # location table would make GPS history permanent by accident.
     assert not any("location" in t for t in tables), "live location must stay out of the database"
 
+    # Phase 10 WS-S — commercial subscriptions and product entitlements.
+    assert PHASE10 <= tables  # 0012 subscription tables present
+    for table, expected in SUBSCRIPTION_COLUMNS.items():
+        assert expected <= _columns(table), f"{table} is missing a subscription column"
+    # These constraints make duplicate commercial identities and duplicate live
+    # grants impossible, while keeping manual grants separate from provider rows.
+    assert {
+        "ck_subscriptions_pro_plan",
+        "ck_subscriptions_period_order",
+        "ck_subscriptions_provider_subscription_id",
+        "ck_subscriptions_provider_event_id",
+    } <= _constraints("subscriptions")
+    assert {
+        "ck_entitlements_source_link",
+        "ck_entitlements_window_order",
+    } <= _constraints("entitlements")
+    assert "uq_subscriptions_provider_external" in _indexes("subscriptions")
+    assert "uq_entitlements_subscription_feature" in _indexes("entitlements")
+    assert "uq_entitlements_manual_feature" in _indexes("entitlements")
+    assert "ix_entitlements_user_feature_status" in _indexes("entitlements")
+    entitlement_fks = set(_foreign_keys("entitlements").values())
+    assert (("user_id",), ("id",), "CASCADE") in entitlement_fks
+    assert (("source_subscription_id",), ("id",), "CASCADE") in entitlement_fks
+    assert (("user_id",), ("id",), "CASCADE") in set(_foreign_keys("subscriptions").values())
+
+    command.downgrade(cfg, "-1")  # 0012 -> 0011
+    tables = _tables()
+    assert PHASE10.isdisjoint(tables)  # subscription tables removed
+    assert EXPECTED - PHASE10 <= tables  # …while 0011 and below remain
+    assert PHASE89 <= tables  # group-ride tables untouched by the WS-S downgrade
+
     command.downgrade(cfg, "-1")  # 0011 -> 0010
     tables = _tables()
     assert PHASE89.isdisjoint(tables)  # group-ride tables removed
-    assert EXPECTED - PHASE89 <= tables  # …while 0010 and below remain
+    assert EXPECTED - PHASE10 - PHASE89 <= tables  # …while 0010 and below remain
     assert PHASE84 <= tables  # notification tables untouched by the group-ride downgrade
     assert PHASE83 <= tables  # chat tables untouched: the enum was rebuilt, not replaced
     # The widened conversation CHECK is restored to the 0009 name and shape, so a
@@ -282,7 +342,7 @@ async def test_migration_upgrade_downgrade_upgrade():
     command.downgrade(cfg, "-1")  # 0010 -> 0009
     tables = _tables()
     assert PHASE84.isdisjoint(tables)  # notification tables removed
-    assert EXPECTED - PHASE84 - PHASE89 <= tables  # …while 0009 and below remain
+    assert EXPECTED - PHASE10 - PHASE84 - PHASE89 <= tables  # …while 0009 and below remain
     assert PHASE83 <= tables  # chat tables untouched by the notification downgrade
 
     command.downgrade(cfg, "-1")  # 0009 -> 0008
@@ -327,6 +387,8 @@ async def test_migration_upgrade_downgrade_upgrade():
     for table, expected in NOTIFICATION_COLUMNS.items():
         assert expected <= _columns(table), f"{table} lost a column on re-apply"
     for table, expected in GROUP_RIDE_COLUMNS.items():
+        assert expected <= _columns(table), f"{table} lost a column on re-apply"
+    for table, expected in SUBSCRIPTION_COLUMNS.items():
         assert expected <= _columns(table), f"{table} lost a column on re-apply"
     # Re-applying must not resurrect the widened conversation CHECK.
     assert "ck_conversations_kind_binding" in _constraints("conversations")

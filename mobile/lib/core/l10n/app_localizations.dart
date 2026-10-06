@@ -619,6 +619,17 @@ class AppLocalizations {
       'coach.recommendations': 'What to consider',
       'coach.notMeasured': 'Not measured',
       'coach.provenance': 'Where these numbers come from',
+      'subscription.lockedTitle': 'This feature requires CycleCoach Pro.',
+      'subscription.lockedBody':
+          '{feature} is a Pro capability. Access is decided by the server; this screen only explains the lock.',
+      'subscription.lockedNoCheckout':
+          'Pro checkout is not available in this build.',
+      'subscription.feature.ai_coach': 'AI Coach',
+      'subscription.feature.advanced_training': 'Advanced training',
+      'subscription.feature.advanced_analytics': 'Advanced analytics',
+      'subscription.feature.advanced_routes': 'Advanced routes',
+      'subscription.feature.no_ads': 'No ads',
+      'subscription.feature.unknown': 'A newer Pro capability',
       // Phase 8.1 — social identity & relationships.
       'social.myProfile': 'Social profile',
       'social.userProfile': 'Rider',
@@ -1698,6 +1709,18 @@ class AppLocalizations {
       'coach.recommendations': 'À quoi faire attention',
       'coach.notMeasured': 'Non mesuré',
       'coach.provenance': 'D’où viennent ces chiffres',
+      'subscription.lockedTitle':
+          'Cette fonctionnalité nécessite CycleCoach Pro.',
+      'subscription.lockedBody':
+          '{feature} est une fonctionnalité Pro. L’accès est décidé par le serveur ; cet écran explique seulement le verrouillage.',
+      'subscription.lockedNoCheckout':
+          'Le paiement Pro n’est pas disponible dans cette version.',
+      'subscription.feature.ai_coach': 'Coach IA',
+      'subscription.feature.advanced_training': 'Entraînement avancé',
+      'subscription.feature.advanced_analytics': 'Analyses avancées',
+      'subscription.feature.advanced_routes': 'Itinéraires avancés',
+      'subscription.feature.no_ads': 'Sans publicité',
+      'subscription.feature.unknown': 'Une nouvelle fonctionnalité Pro',
     },
     'ar': {
       // Phase 8.2 — الفرق والمجموعات الدراجية.
@@ -2501,6 +2524,16 @@ class AppLocalizations {
       'coach.recommendations': 'ما ينبغي أخذه بعين الاعتبار',
       'coach.notMeasured': 'غير مقيس',
       'coach.provenance': 'مصدر هذه الأرقام',
+      'subscription.lockedTitle': 'تتطلب هذه الميزة CycleCoach Pro.',
+      'subscription.lockedBody':
+          '{feature} ميزة Pro. يقرر الخادم الوصول؛ توضح هذه الشاشة القفل فقط.',
+      'subscription.lockedNoCheckout': 'الدفع لـ Pro غير متوفر في هذه النسخة.',
+      'subscription.feature.ai_coach': 'المدرب الذكي',
+      'subscription.feature.advanced_training': 'التدريب المتقدم',
+      'subscription.feature.advanced_analytics': 'التحليلات المتقدمة',
+      'subscription.feature.advanced_routes': 'المسارات المتقدمة',
+      'subscription.feature.no_ads': 'بدون إعلانات',
+      'subscription.feature.unknown': 'ميزة Pro جديدة',
     },
   };
 

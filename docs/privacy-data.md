@@ -64,6 +64,7 @@ boundary**, never by the client, and never by the mere knowledge of an object id
 | Chat messages | ✅ | ✅ conversation members | ✅ team channel | ✅ ride channel | — | — |
 | Notifications | ✅ own | — | — | — | — | — |
 | Push device tokens | ✅ own | — | — | — | — | — |
+| Subscriptions, entitlements | ✅ own | — | — | — | — | — |
 
 **No entry in this table is reachable by knowing an identifier.** Verified for the
 sensitive rows by `test_a_non_participant_cannot_read_any_position` and
@@ -115,7 +116,7 @@ able to make its own position look fresh forever.
 
 ## 4. Data inventory
 
-33 tables. "Deletion" describes what exists **today**; where nothing exists it
+35 tables. "Deletion" describes what exists **today**; where nothing exists it
 says so.
 
 ### 4.1 `users` — HIGHLY SENSITIVE (credentials)
@@ -312,10 +313,37 @@ ownership, and `extra="forbid"` means a client supplying its own metrics gets a
 an identity to "asked about a possible injury" is exactly the health-adjacent
 record the privacy rules forbid (`test_a_safety_event_logs_no_user_identity`).
 
-### 4.21 Subscriptions — NOT IMPLEMENTED
+### 4.21 Subscriptions — PRIVATE (account/billing metadata)
 
-No subscription table, endpoint or entitlement model exists. Intentionally
-absent; see §10.
+Phase 10, WS-S. Two tables; no billing integration, no purchase flow, no ads.
+
+**`subscriptions`** — one row per commercial relationship: `user_id` (CASCADE),
+`provider` (`manual` in every row written today — no store is integrated),
+`provider_subscription_id` and `last_provider_event_id` (stable external
+identifiers, kept for idempotent event handling), `plan` (`pro`, CHECKed),
+`status`, `started_at`, `current_period_start/end`, `cancel_at_period_end`,
+`created_at`, `updated_at`.
+
+**`entitlements`** — one row per granted capability: `user_id` (CASCADE),
+`feature` (`ai_coach`, `advanced_training`, `advanced_analytics`,
+`advanced_routes`, `no_ads`), `status` (`active`/`inactive`/`revoked`),
+`source` (`subscription`/`manual`), `source_subscription_id` (CASCADE, NULL for
+manual grants), `starts_at`, `expires_at`, `created_at`, `updated_at`.
+
+**Never stored:** card data, purchase tokens, receipts, provider secrets,
+access tokens, or any credential. External ids are the only provider-issued
+values kept, and only because duplicate/out-of-order event handling needs
+them.
+
+**Access:** owner only, and only through `GET /me/entitlements`, which returns
+plan, free capabilities, and the caller's own rows — never provider
+identifiers, never another rider. There is no parameterized route and no
+mutation route. Logs carry bounded enums and counts only; metrics carry
+`feature`/`plan`/`status`/`outcome` labels only (see `docs/observability.md`).
+
+**Deletion:** both tables CASCADE from `users`, so a deleted rider leaves no
+subscription or entitlement rows. (Account deletion itself remains deferred,
+§8.)
 
 ---
 
@@ -341,6 +369,8 @@ Enforced by `redact()` and by per-service discipline; regression-tested in
 Recorded because absence is a design decision, and each is now test-enforced.
 
 - **No durable location history table** (`test_no_location_table_exists_in_the_schema`)
+- **No payment credentials, purchase tokens, receipts, or provider secrets**
+  (`test_tables_store_no_payment_or_purchase_secrets`)
 - **No AI conversation history** (`test_ai_writes_nothing_to_the_database`)
 - **No account deletion / erasure request table**
 - **No data-export job table**
@@ -360,7 +390,7 @@ Summary of the privacy-relevant position:
 
 | Data | Backed up? | Why |
 |---|---|---|
-| PostgreSQL (all 33 tables) | **Yes** — the only system of record | Loss is unrecoverable |
+| PostgreSQL (all 35 tables) | **Yes** — the only system of record | Loss is unrecoverable |
 | Redis live positions | **No** | Deliberately ephemeral; consent-based, TTL 300 s |
 | Application logs | Depends on infrastructure | Not yet configured — **PENDING** |
 | GPX uploads | N/A | Never stored |
@@ -430,7 +460,6 @@ Not implemented. Recorded here as a known gap.
 - Data export / portability (only GPX **route** export exists; there is no ride,
   training, chat or social export)
 - Consent and policy-acceptance records
-- Subscription or entitlement data
 - Location history for a rider's own past rides beyond their own stored points
 
 ---

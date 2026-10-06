@@ -10,7 +10,9 @@ from sqlalchemy.orm import selectinload
 
 from app.core import security
 from app.db.session import get_db
+from app.models.subscription import Feature
 from app.models.user import User, UserStatus
+from app.services import subscription_service
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -50,3 +52,24 @@ async def get_user_by_id_strict(user_id: uuid.UUID, db: AsyncSession, requester:
     if user is None:
         raise HTTPException(status_code=404, detail="Not found.")
     return user
+
+
+def require_entitlement(feature: Feature):
+    """FastAPI dependency factory for one premium capability.
+
+    Every protected route calls this rather than repeating its own
+    subscription check. The dependency returns the authenticated user so route
+    signatures do not need both it and ``get_current_user``. Authorization is
+    always re-resolved from the caller's own database rows.
+    """
+
+    async def _guard(
+        db: AsyncSession = Depends(get_db),
+        user: User = Depends(get_current_user),
+    ) -> User:
+        allowed, _ = await subscription_service.evaluate_feature(db, user.id, feature)
+        if not allowed:
+            raise HTTPException(status_code=403, detail=subscription_service.denial_detail(feature))
+        return user
+
+    return _guard

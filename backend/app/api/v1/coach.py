@@ -14,10 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import prompts
 from app.ai.service import CoachError, build_context, respond
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_entitlement
 from app.core.config import settings
 from app.core.rate_limit import allow
 from app.db.session import get_db
+from app.models.subscription import Feature
 from app.models.user import User
 from app.schemas.coach import (
     CoachExplainRequest,
@@ -73,10 +74,15 @@ def _check_locale(locale: str) -> str:
 @router.post("/message", response_model=CoachResponse)
 async def post_message(
     body: CoachMessageRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_entitlement(Feature.AI_COACH))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CoachResponse:
-    """General entry point. The body carries a pointer, never metrics."""
+    """General entry point. The body carries a pointer, never metrics.
+
+    Generated answers are a Pro capability. Status metadata stays Free so the
+    client can distinguish "locked" from "provider unavailable" without calling
+    a premium endpoint.
+    """
     ref: ContextReference = body.context_reference or ContextReference()
     if ref.ride_id is not None and ref.workout_id is not None:
         raise HTTPException(
@@ -95,7 +101,7 @@ async def post_message(
 async def explain_ride(
     ride_id: uuid.UUID,
     body: CoachExplainRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_entitlement(Feature.AI_COACH))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CoachResponse:
     return await _coach(
@@ -107,7 +113,7 @@ async def explain_ride(
 async def explain_workout(
     workout_id: uuid.UUID,
     body: CoachExplainRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_entitlement(Feature.AI_COACH))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CoachResponse:
     return await _coach(
@@ -117,7 +123,7 @@ async def explain_workout(
 
 @router.get("/weekly-summary", response_model=CoachResponse)
 async def weekly_summary(
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(require_entitlement(Feature.AI_COACH))],
     db: Annotated[AsyncSession, Depends(get_db)],
     locale: str = "en",
 ) -> CoachResponse:

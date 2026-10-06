@@ -16,7 +16,9 @@ from app.ai import service as coach_service
 from app.ai.fake import FakeAIProvider
 from app.ai.types import ProviderTimeout, ProviderUnavailable
 from app.core.config import settings
+from app.models.subscription import Plan, SubscriptionProvider, SubscriptionStatus
 from app.schemas.coach import CoachIntent
+from app.services.subscription_service import ProviderSubscriptionEvent, apply_provider_event
 
 COACH = "/api/v1/coach"
 AUTH = "/api/v1/auth"
@@ -80,7 +82,55 @@ async def _user(client, data):
         f"{AUTH}/login", json={"email": data["email"], "password": data["password"]}
     )
     assert r.status_code == 200
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    # These are entitlement-aware API tests, not Free-tier tests. Grant the
+    # capability under test directly in the database: there is deliberately no
+    # client-accessible grant endpoint, so this is the only honest way to make
+    # an entitled caller.
+    await _grant_ai_coach(client, headers)
+    return headers
+
+
+@pytest.fixture(autouse=True)
+async def _use_shared_test_sessions(db_session_factory):
+    """Expose the shared session factory to the file-local user helper.
+
+    The helper intentionally does not take a fixture argument: thirty-one call
+    sites would otherwise need a mechanical signature change for no behavioral
+    benefit. This stays inside the test module.
+    """
+    global _TEST_SESSIONS
+    _TEST_SESSIONS = db_session_factory
+    try:
+        yield
+    finally:
+        _TEST_SESSIONS = None
+
+
+_TEST_SESSIONS = None
+
+
+async def _grant_ai_coach(client, headers):
+    me = await client.get(f"{AUTH}/me", headers=headers)
+    assert me.status_code == 200, me.text
+    user_id = uuid.UUID(me.json()["user"]["id"])
+    now = datetime.now(UTC)
+    assert _TEST_SESSIONS is not None
+    async with _TEST_SESSIONS() as db:
+        await apply_provider_event(
+            db,
+            ProviderSubscriptionEvent(
+                provider=SubscriptionProvider.MANUAL,
+                provider_subscription_id=f"manual-{uuid.uuid4().hex}",
+                provider_event_id=f"event-{uuid.uuid4().hex}",
+                user_id=user_id,
+                plan=Plan.PRO,
+                status=SubscriptionStatus.ACTIVE,
+                effective_start=now - timedelta(days=1),
+                effective_end=now + timedelta(days=30),
+                occurred_at=now,
+            ),
+        )
 
 
 async def _power_ride(client, headers, *, minutes=3, watts=250, hr=150):

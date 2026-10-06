@@ -67,6 +67,9 @@ _ALLOWED_LABEL_NAMES = frozenset(
         "intent",
         "reason",
         "notification_type",
+        "feature",
+        "plan",
+        "status",
     }
 )
 
@@ -377,6 +380,35 @@ def record_location_event(outcome: str) -> None:
     sharing working", never "where is this rider".
     """
     metrics.increment("location_events_total", outcome=outcome)
+
+
+def record_subscription_event(*, event: str, provider: str, status: str) -> None:
+    """Count a subscription lifecycle transition.
+
+    The labels are bounded lifecycle vocabulary: what happened, which origin,
+    and the resulting commercial status. Provider subscription ids, event ids,
+    users, and purchase credentials are never labels.
+    """
+    metrics.increment("subscription_events_total", event=event, provider=provider, status=status)
+
+
+def record_entitlement_check(*, feature: str, outcome: str, plan: str) -> None:
+    """Count one server-side capability decision.
+
+    ``feature`` and ``plan`` are bounded product vocabulary. ``outcome`` is
+    either ``allowed`` or ``denied``. The caller is never identified.
+    """
+    metrics.increment("entitlement_checks_total", feature=feature, outcome=outcome, plan=plan)
+
+
+def record_entitlement_denial(*, feature: str, plan: str) -> None:
+    """Count a denial separately so it cannot hide in an aggregate.
+
+    A denial is operationally distinct from an allowed check: a sudden rise can
+    mean expired subscriptions, a broken grant path, or an attack probing
+    premium routes.
+    """
+    metrics.increment("entitlement_denials_total", feature=feature, plan=plan)
 
 
 def allowed_label_names() -> Iterable[str]:

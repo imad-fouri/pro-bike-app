@@ -102,6 +102,9 @@ from the request.
 | `ai_fallbacks_total` | counter | `provider`, `intent` | Deterministic fallback engaged |
 | `notification_events_total` | counter | `notification_type`, `outcome` | Created / deduped / delivered / failed |
 | `location_events_total` | counter | `outcome` | Live sharing working, **nothing else** |
+| `subscription_events_total` | counter | `event`, `provider`, `status` | Applied / duplicate-ignored / out-of-order-ignored, by origin and resulting status |
+| `entitlement_checks_total` | counter | `feature`, `outcome`, `plan` | Allowed / denied capability decisions, by caller plan |
+| `entitlement_denials_total` | counter | `feature`, `plan` | Denials kept separate so they cannot hide in an aggregate |
 
 **`route` is the matched path template, never the raw path.**
 `/api/v1/group-rides/8f3a…` is unbounded — one series per ride, forever.
@@ -123,9 +126,14 @@ that cannot compute one.
 ### Rejected label dimensions
 
 `user_id`, `email`, `username`, `ride_id`, `route_id`, `group_ride_id`,
-`request_id`, GPS coordinates, free text, raw request paths, notification params.
+`request_id`, `subscription_id`, `provider_subscription_id`, `provider_event_id`,
+GPS coordinates, free text, raw request paths, notification params.
 All are either unbounded or identifying, and a metric label is a permanent store —
 unlike a log line, nothing ever rotates it out.
+
+`feature`, `plan`, and lifecycle `status` are allowed because they are closed
+product vocabularies (`ai_coach`…`no_ads`, `free`/`pro`, `active`…`revoked`) —
+enumerations, not values from any request.
 
 Request ids appear in **logs and headers**, where they are searchable and cheap,
 and never in a metric, where they would create one series per request.
