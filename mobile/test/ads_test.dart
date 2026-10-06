@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cyclecoach/core/l10n/app_localizations.dart';
 import 'package:cyclecoach/core/network/api_client.dart';
 import 'package:cyclecoach/core/storage/token_storage.dart';
+import 'package:cyclecoach/features/ads/data/ad_consent_store.dart';
 import 'package:cyclecoach/features/ads/data/ad_provider.dart';
 import 'package:cyclecoach/features/ads/domain/ad_policy.dart';
 import 'package:cyclecoach/features/ads/presentation/ad_policy_providers.dart';
@@ -12,6 +13,7 @@ import 'package:cyclecoach/features/ride/data/ride_recorder.dart';
 import 'package:cyclecoach/features/ride/domain/gps_processor.dart';
 import 'package:cyclecoach/features/ride/presentation/ride_providers.dart';
 import 'package:cyclecoach/features/subscriptions/domain/entitlement.dart';
+import 'package:cyclecoach/features/subscriptions/domain/store_products.dart';
 import 'package:cyclecoach/features/subscriptions/presentation/entitlement_providers.dart';
 import 'package:cyclecoach/shared/widgets/ad_slot_widget.dart';
 import 'package:flutter/material.dart';
@@ -137,6 +139,7 @@ ProviderContainer policyContainer({
   Future<EntitlementState?> Function()? entitlements,
   AdProvider? provider,
   Duration? ttl,
+  AdConsentStore? consentStore,
 }) {
   return ProviderContainer(
     overrides: [
@@ -148,6 +151,9 @@ ProviderContainer policyContainer({
       ),
       if (provider != null) adProviderProvider.overrideWithValue(provider),
       if (ttl != null) entitlementCacheTtlProvider.overrideWithValue(ttl),
+      adConsentStoreProvider.overrideWithValue(
+        consentStore ?? MemoryAdConsentStore(),
+      ),
     ],
   );
 }
@@ -251,6 +257,7 @@ ProviderContainer sessionContainer(
       // keeps the HTTP-stamped fetch fresh against the fixed test clock.
       // Staleness itself is covered deterministically by the stale test.
       entitlementCacheTtlProvider.overrideWithValue(const Duration(days: 365)),
+      adConsentStoreProvider.overrideWithValue(MemoryAdConsentStore()),
     ],
   );
 }
@@ -628,6 +635,7 @@ void main() {
             ),
           ),
           if (provider != null) adProviderProvider.overrideWithValue(provider),
+          adConsentStoreProvider.overrideWithValue(MemoryAdConsentStore()),
         ],
       );
       if (grantConsent) {
@@ -671,8 +679,10 @@ void main() {
       expect(find.byKey(const Key('fake.ad')), findsOneWidget);
       expect(provider.loads, 1);
       expect(provider.lastContext!.slot, AdSlot.home);
-      // The context carries nothing identifying.
-      expect(provider.lastContext!.toSafeMap().keys, hasLength(3));
+      // The context carries nothing identifying: slot, locale, version, and
+      // the slot's coarse category — four keys, no more.
+      expect(provider.lastContext!.toSafeMap().keys, hasLength(4));
+      expect(provider.lastContext!.toSafeMap()['content_category'], 'cycling');
     });
 
     testWidgets('a throwing provider fails to nothing, never a crash', (
@@ -722,4 +732,122 @@ void main() {
       expect(provider.loads, 0);
     });
   });
+
+  group('content taxonomy', () {
+    test('the taxonomy is exactly the four approved categories', () {
+      expect(AdContentCategory.values.map((c) => c.wire), [
+        'cycling',
+        'training',
+        'routes',
+        'equipment',
+        'unknown',
+      ]);
+      expect(AdContentCategory.parse('training'), AdContentCategory.training);
+      expect(AdContentCategory.parse('per-ride'), AdContentCategory.unknown);
+      expect(AdContentCategory.parse(null), AdContentCategory.unknown);
+    });
+
+    test('every allowed slot has a screen-level default category', () {
+      expect(AdSlot.home.defaultContentCategory, AdContentCategory.cycling);
+      expect(
+        AdSlot.rideSummary.defaultContentCategory,
+        AdContentCategory.cycling,
+      );
+      expect(
+        AdSlot.trainingSummary.defaultContentCategory,
+        AdContentCategory.training,
+      );
+      expect(
+        AdSlot.routeDiscovery.defaultContentCategory,
+        AdContentCategory.routes,
+      );
+      expect(
+        AdSlot.socialFeed.defaultContentCategory,
+        AdContentCategory.cycling,
+      );
+      expect(AdSlot.unknown.defaultContentCategory, AdContentCategory.unknown);
+    });
+  });
+
+  group('provider adapter boundary', () {
+    test('a disabled config is unavailable with no units', () {
+      const config = AdProviderConfig.disabled();
+      expect(config.enabled, isFalse);
+      expect(config.unitIds, isEmpty);
+      expect(config.unitIdFor(AdSlot.home), isNull);
+    });
+
+    test('an enabled config resolves per-slot unit ids', () {
+      const config = AdProviderConfig(
+        enabled: true,
+        unitIds: {AdSlot.home: 'ca-app-pub-test/1'},
+      );
+      expect(config.enabled, isTrue);
+      expect(config.unitIdFor(AdSlot.home), 'ca-app-pub-test/1');
+      expect(config.unitIdFor(AdSlot.rideSummary), isNull);
+    });
+
+    test('the environment config defaults to disabled with no units', () {
+      // No --dart-define flags are passed in tests, so this asserts the
+      // fail-closed default: an unconfigured build stays dark.
+      final config = AdProviderConfig.fromEnvironment();
+      expect(config.enabled, isFalse);
+      expect(config.unitIds, isEmpty);
+    });
+
+    test('the deferred provider is an unavailable adapter', () {
+      final provider = NoOpAdProvider();
+      expect(provider, isA<AdProviderAdapter>());
+      expect(provider, isA<AdProvider>());
+      expect(provider.isAvailable, isFalse);
+      expect(provider.config.enabled, isFalse);
+    });
+
+    test('an enabled adapter base narrows availability honestly', () {
+      final adapter = _EnabledAdapter();
+      expect(adapter.isAvailable, isTrue);
+    });
+  });
+
+  group('store catalog', () {
+    test('the catalog holds exactly the two provisional products', () {
+      expect(StoreCatalog.products.map((p) => p.id), [
+        'cyclecoach_pro_monthly',
+        'cyclecoach_pro_yearly',
+      ]);
+      for (final product in StoreCatalog.products) {
+        expect(product.plan, SubscriptionPlan.pro);
+        expect(product.available, isFalse);
+      }
+      expect(StoreCatalog.products.map((p) => p.billingPeriod), [
+        BillingPeriod.monthly,
+        BillingPeriod.yearly,
+      ]);
+    });
+
+    test('lookup is the single normalization point', () {
+      final monthly = StoreCatalog.byId('cyclecoach_pro_monthly');
+      expect(monthly, isNotNull);
+      expect(monthly!.plan, SubscriptionPlan.pro);
+      expect(StoreCatalog.byId('not_ours'), isNull);
+      expect(StoreCatalog.byId(''), isNull);
+    });
+
+    test('nothing is offerable while no store is integrated', () {
+      expect(StoreCatalog.availableFor(SubscriptionPlan.pro), isEmpty);
+      expect(StoreCatalog.availableFor(SubscriptionPlan.free), isEmpty);
+    });
+  });
+}
+
+/// An adapter with configuration switched on, proving the base class
+/// narrows (never widens) availability from config. Test-only.
+class _EnabledAdapter extends AdProviderAdapter {
+  _EnabledAdapter() : super(const AdProviderConfig(enabled: true, unitIds: {}));
+
+  @override
+  Future<AdLoadResult> load(AdContext context) async => const AdEmpty();
+
+  @override
+  Widget? renderSlot(BuildContext context, AdSlot slot) => null;
 }

@@ -18,6 +18,7 @@ import '../../features/group_rides/presentation/group_ride_form_page.dart';
 import '../../features/group_rides/presentation/group_rides_page.dart';
 import '../../features/coach/presentation/coach_page.dart';
 import '../../features/notifications/presentation/notification_center_page.dart';
+import '../../features/ads/presentation/consent_page.dart';
 import '../../features/notifications/presentation/notification_settings_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/profile_page.dart';
@@ -259,6 +260,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (c, s) => GroupRideDetailPage(rideId: s.pathParameters['id']!),
       ),
 
+      // WS-SM: advertising choices. A real screen, not a placeholder: consent
+      // needs its own route so profile, settings, and future first-run flows
+      // can all link to the same decision point.
+      GoRoute(path: '/settings/ads', builder: (c, s) => const ConsentPage()),
       for (final p in ['/rides', '/performance', '/settings'])
         GoRoute(
           path: p,

@@ -242,6 +242,21 @@ MockClient mock({
     if (req.url.path.startsWith('/api/v1/coach/')) {
       return http.Response(jsonEncode(answer), answerStatus);
     }
+    // WS-SM: the home screen mounts an ad slot whose policy reads the
+    // entitlement cache. The real backend answers this endpoint, so the
+    // double must too — otherwise the fetch errors and Riverpod's retry
+    // timer outlives the test.
+    if (req.url.path.endsWith('/me/entitlements')) {
+      return http.Response(
+        jsonEncode({
+          'plan': 'free',
+          'free_capabilities': const ['core_ride_recording'],
+          'entitlements': const [],
+          'evaluated_at': '2026-10-06T06:00:00Z',
+        }),
+        200,
+      );
+    }
     return http.Response('not found', 404);
   });
 }

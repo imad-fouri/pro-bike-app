@@ -81,7 +81,14 @@ class _AdSlotWidgetState extends ConsumerState<AdSlotWidget> {
       if (!provider.isAvailable) return;
       await provider.initialize();
       final result = await provider.load(
-        AdContext(slot: widget.slot, locale: locale, appVersion: appVersion),
+        AdContext(
+          slot: widget.slot,
+          locale: locale,
+          appVersion: appVersion,
+          // The slot's own coarse category — about the screen, never the
+          // rider. See AdContentCategory.
+          contentCategory: widget.slot.defaultContentCategory.wire,
+        ),
       );
       filled = result.filled;
     } catch (_) {

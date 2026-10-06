@@ -63,7 +63,88 @@ abstract interface class AdProvider {
   Widget? renderSlot(BuildContext context, AdSlot slot);
 }
 
-/// The deferred provider: the honest "not yet".
+/// Runtime configuration for a provider adapter.
+///
+/// Values arrive via `--dart-define`, never from committed source: unit ids
+/// are deployment configuration, and any future credential-shaped value
+/// belongs in platform secret storage, not here. An absent define means
+/// "not configured", which adapters treat as unavailable rather than
+/// inventing an identity.
+class AdProviderConfig {
+  final bool enabled;
+  final Map<AdSlot, String> unitIds;
+
+  const AdProviderConfig({required this.enabled, this.unitIds = const {}});
+
+  const AdProviderConfig.disabled() : enabled = false, unitIds = const {};
+
+  /// Reads `ADS_ENABLED` and per-slot `AD_UNIT_<SLOT>` defines
+  /// (e.g. `AD_UNIT_HOME`). Empty strings count as absent: an empty unit id
+  /// is a misconfiguration, and misconfigurations stay dark.
+  ///
+  /// Each define is spelled out because `String.fromEnvironment` requires a
+  /// compile-time-constant name — a loop cannot generate them. Adding a slot
+  /// means adding its line here, which keeps unit-id inventory reviewable.
+  factory AdProviderConfig.fromEnvironment() {
+    const home = String.fromEnvironment('AD_UNIT_HOME', defaultValue: '');
+    const rideSummary = String.fromEnvironment(
+      'AD_UNIT_RIDE_SUMMARY',
+      defaultValue: '',
+    );
+    const trainingSummary = String.fromEnvironment(
+      'AD_UNIT_TRAINING_SUMMARY',
+      defaultValue: '',
+    );
+    const routeDiscovery = String.fromEnvironment(
+      'AD_UNIT_ROUTE_DISCOVERY',
+      defaultValue: '',
+    );
+    const socialFeed = String.fromEnvironment(
+      'AD_UNIT_SOCIAL_FEED',
+      defaultValue: '',
+    );
+    return AdProviderConfig(
+      enabled: const bool.fromEnvironment('ADS_ENABLED'),
+      unitIds: {
+        if (home.isNotEmpty) AdSlot.home: home,
+        if (rideSummary.isNotEmpty) AdSlot.rideSummary: rideSummary,
+        if (trainingSummary.isNotEmpty) AdSlot.trainingSummary: trainingSummary,
+        if (routeDiscovery.isNotEmpty) AdSlot.routeDiscovery: routeDiscovery,
+        if (socialFeed.isNotEmpty) AdSlot.socialFeed: socialFeed,
+      },
+    );
+  }
+
+  String? unitIdFor(AdSlot slot) => unitIds[slot];
+}
+
+/// The adapter seam every real provider will extend.
+///
+/// `AdProvider` is the contract the app speaks; `AdProviderAdapter` is the
+/// base a concrete SDK adapter builds on. It contributes the shared,
+/// provider-independent machinery — config gating, unit-id lookup, and safe
+/// lifecycle defaults — so a future adapter contains only SDK calls and no
+/// policy, storage, or entitlement logic. Authorization-adjacent code can
+/// never creep into an adapter because there is nothing here to attach it
+/// to: no session, no entitlements, no user data.
+abstract class AdProviderAdapter implements AdProvider {
+  final AdProviderConfig config;
+
+  AdProviderAdapter([this.config = const AdProviderConfig.disabled()]);
+
+  /// A disabled or unconfigured adapter is unavailable, full stop. Individual
+  /// adapters may narrow this further (SDK not initialized, no fill); they
+  /// may never widen it.
+  @override
+  bool get isAvailable => config.enabled;
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
 ///
 /// - never contacts any external ad service (there is no SDK, no endpoint,
 ///   no unit id anywhere in this file or its imports);
@@ -74,16 +155,10 @@ abstract interface class AdProvider {
 ///
 /// Swapping in a real provider means implementing [AdProvider] and overriding
 /// [adProviderProvider] — no screen, policy rule, or widget changes.
-class NoOpAdProvider implements AdProvider {
+class NoOpAdProvider extends AdProviderAdapter {
   bool _disposed = false;
 
-  @override
-  Future<void> initialize() async {
-    // Intentionally nothing: there is no SDK to warm up.
-  }
-
-  @override
-  bool get isAvailable => false;
+  NoOpAdProvider() : super(const AdProviderConfig.disabled());
 
   @override
   Future<AdLoadResult> load(AdContext context) async {

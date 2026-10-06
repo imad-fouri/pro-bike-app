@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/app_localizations.dart';
+import '../../../shared/widgets/ad_slot_widget.dart';
+import '../../ads/domain/ad_policy.dart';
 import '../domain/units.dart';
 import 'ride_providers.dart';
 
@@ -54,6 +56,11 @@ class _RideSummaryPageState extends ConsumerState<RideSummaryPage> {
                 ),
               ),
             const Spacer(),
+            // Post-ride summary slot: the ride is finished, so nothing here
+            // can interfere with recording. Above Done, never between the
+            // rider and leaving.
+            const AdSlotWidget(slot: AdSlot.rideSummary),
+            const SizedBox(height: 8),
             FilledButton(
               onPressed: () => context.go('/home'),
               child: Text(t.get('ride.done')),

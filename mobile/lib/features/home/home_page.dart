@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/ad_slot_widget.dart';
 import '../../../shared/widgets/brand.dart';
+import '../ads/domain/ad_policy.dart';
 import '../auth/presentation/auth_state.dart';
 import '../notifications/presentation/notification_providers.dart';
 import '../notifications/presentation/notification_widgets.dart';
@@ -110,6 +112,11 @@ class HomePage extends ConsumerWidget {
             ),
             label: Text(t.get('ride.record')),
           ),
+          // The home slot, last in the scroll: below the primary action so
+          // it can never push the record button out of reach. The screen
+          // knows only the slot; policy, consent, and provider live in the
+          // centralized widget.
+          const AdSlotWidget(slot: AdSlot.home),
         ],
       ),
       bottomNavigationBar: NavigationBar(

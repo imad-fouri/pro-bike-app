@@ -48,6 +48,49 @@ enum AdSlot {
     AdSlot.routeDiscovery,
     AdSlot.socialFeed,
   ];
+
+  /// The coarse content category describing the slot's own screen — never
+  /// the rider's data. A home screen is about cycling in general; a training
+  /// screen is about training. The category travels in [AdContext] so a
+  /// future provider can separate "cycling content" inventory without ever
+  /// seeing what the rider did.
+  AdContentCategory get defaultContentCategory => switch (this) {
+    AdSlot.home => AdContentCategory.cycling,
+    AdSlot.rideSummary => AdContentCategory.cycling,
+    AdSlot.trainingSummary => AdContentCategory.training,
+    AdSlot.routeDiscovery => AdContentCategory.routes,
+    AdSlot.socialFeed => AdContentCategory.cycling,
+    AdSlot.unknown => AdContentCategory.unknown,
+  };
+}
+
+/// Coarse content categories for ad context. Four values plus unknown —
+/// deliberately small: each category must be justifiable as "about the
+/// screen, never about the rider". There is no per-ride, per-route, or
+/// per-user category, because those would be rider data wearing a
+/// category costume.
+enum AdContentCategory {
+  cycling,
+  training,
+  routes,
+  equipment,
+  unknown;
+
+  String get wire => switch (this) {
+    AdContentCategory.cycling => 'cycling',
+    AdContentCategory.training => 'training',
+    AdContentCategory.routes => 'routes',
+    AdContentCategory.equipment => 'equipment',
+    AdContentCategory.unknown => 'unknown',
+  };
+
+  static AdContentCategory parse(String? raw) => switch (raw) {
+    'cycling' => AdContentCategory.cycling,
+    'training' => AdContentCategory.training,
+    'routes' => AdContentCategory.routes,
+    'equipment' => AdContentCategory.equipment,
+    _ => AdContentCategory.unknown,
+  };
 }
 
 /// Advertising-consent state machine.
@@ -69,6 +112,22 @@ enum AdConsentState {
   /// not required. Unknown, required-but-unanswered, and denied all refuse.
   /// Fail-closed is the only safe default for a state that starts unknown.
   bool get permitsAds => this == granted || this == notRequired;
+
+  String get wire => switch (this) {
+    AdConsentState.unknown => 'unknown',
+    AdConsentState.notRequired => 'not_required',
+    AdConsentState.required => 'required',
+    AdConsentState.granted => 'granted',
+    AdConsentState.denied => 'denied',
+  };
+
+  static AdConsentState parse(String? raw) => switch (raw) {
+    'not_required' => AdConsentState.notRequired,
+    'required' => AdConsentState.required,
+    'granted' => AdConsentState.granted,
+    'denied' => AdConsentState.denied,
+    _ => AdConsentState.unknown,
+  };
 }
 
 /// The only information an ad provider may ever receive about a request.

@@ -381,6 +381,7 @@ class AppLocalizations {
       'ride.heartRate': 'Heart Rate',
       'ride.cadence': 'Cadence',
       'profile.settings': 'Settings',
+      'profile.adsConsent': 'Advertising choices',
       'home.todaysWorkout': "Today's Workout",
       'home.workoutType': 'Endurance Ride',
       'home.workoutDistance': '45 km',
@@ -630,6 +631,16 @@ class AppLocalizations {
       'subscription.feature.advanced_routes': 'Advanced routes',
       'subscription.feature.no_ads': 'No ads',
       'subscription.feature.unknown': 'A newer Pro capability',
+      'consent.title': 'Advertising choices',
+      'consent.body':
+          'Free accounts may see ads in a few clearly marked spots. You decide whether CycleCoach may show you ads, and you can change this choice at any time. This choice does not change your subscription, your features, or how your data is handled.',
+      'consent.allow': 'Allow ads',
+      'consent.deny': 'Don’t allow',
+      'consent.later': 'Decide later',
+      'consent.status.unknown': 'No choice recorded yet.',
+      'consent.status.granted': 'Ads are allowed. You can change this anytime.',
+      'consent.status.denied':
+          'Ads are not allowed. You can change this anytime.',
       // Phase 8.1 — social identity & relationships.
       'social.myProfile': 'Social profile',
       'social.userProfile': 'Rider',
@@ -1467,6 +1478,7 @@ class AppLocalizations {
       'ride.heartRate': 'Fréquence cardiaque',
       'ride.cadence': 'Cadence',
       'profile.settings': 'Paramètres',
+      'profile.adsConsent': 'Choix publicitaires',
       'home.todaysWorkout': 'Entraînement du jour',
       'home.workoutType': "Sortie d’endurance",
       'home.workoutDistance': '45 km',
@@ -1721,6 +1733,17 @@ class AppLocalizations {
       'subscription.feature.advanced_routes': 'Itinéraires avancés',
       'subscription.feature.no_ads': 'Sans publicité',
       'subscription.feature.unknown': 'Une nouvelle fonctionnalité Pro',
+      'consent.title': 'Choix publicitaires',
+      'consent.body':
+          'Les comptes gratuits peuvent voir des publicités à quelques endroits clairement indiqués. Vous décidez si CycleCoach peut vous montrer des publicités, et vous pouvez modifier ce choix à tout moment. Ce choix ne change ni votre abonnement, ni vos fonctionnalités, ni le traitement de vos données.',
+      'consent.allow': 'Autoriser les publicités',
+      'consent.deny': 'Ne pas autoriser',
+      'consent.later': 'Décider plus tard',
+      'consent.status.unknown': 'Aucun choix enregistré pour le moment.',
+      'consent.status.granted':
+          'Les publicités sont autorisées. Vous pouvez changer d’avis à tout moment.',
+      'consent.status.denied':
+          'Les publicités ne sont pas autorisées. Vous pouvez changer d’avis à tout moment.',
     },
     'ar': {
       // Phase 8.2 — الفرق والمجموعات الدراجية.
@@ -2288,6 +2311,7 @@ class AppLocalizations {
       'ride.heartRate': 'معدل نبض القلب',
       'ride.cadence': 'التدرّج',
       'profile.settings': 'الإعدادات',
+      'profile.adsConsent': 'خيارات الإعلانات',
       'home.todaysWorkout': 'تدريب اليوم',
       'home.workoutType': 'تمارين تحمّل',
       'home.workoutDistance': '45 كم',
@@ -2534,6 +2558,16 @@ class AppLocalizations {
       'subscription.feature.advanced_routes': 'المسارات المتقدمة',
       'subscription.feature.no_ads': 'بدون إعلانات',
       'subscription.feature.unknown': 'ميزة Pro جديدة',
+      'consent.title': 'خيارات الإعلانات',
+      'consent.body':
+          'قد تظهر إعلانات للحسابات المجانية في بعض الأماكن المحددة بوضوح. أنت تقرر ما إذا كان بإمكان CycleCoach عرض إعلانات لك، ويمكنك تغيير هذا الاختيار في أي وقت. لا يغيّر هذا الاختيار اشتراكك أو ميزاتك أو طريقة التعامل مع بياناتك.',
+      'consent.allow': 'السماح بالإعلانات',
+      'consent.deny': 'عدم السماح',
+      'consent.later': 'التقرير لاحقاً',
+      'consent.status.unknown': 'لم يتم تسجيل أي اختيار بعد.',
+      'consent.status.granted': 'الإعلانات مسموحة. يمكنك تغيير ذلك في أي وقت.',
+      'consent.status.denied':
+          'الإعلانات غير مسموحة. يمكنك تغيير ذلك في أي وقت.',
     },
   };
 

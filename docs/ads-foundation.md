@@ -108,10 +108,14 @@ impression/click/revenue event exists anywhere by design (§14).
 Only `granted` and `notRequired` permit ads; everything else refuses,
 including the initial `unknown`. The enum describes product knowledge, not a
 legal finding — its existence claims no GDPR/ATT compliance, and the actual
-consent flows are a later workstream. Consent is session-tied (unknown on
-logout, re-chosen per session) and never persisted, which fails closed by
-construction. There is no pre-existing consent store to integrate with
-(`docs/privacy-data.md` §6 records the absence).
+consent flows are a later workstream.
+
+Storage (WS-SM): per-account secure storage (`cc_ad_consent.<accountId>`),
+restored on login, memory-cleared on logout, never inherited across
+accounts. Storage failure fails closed to unknown. There is no pre-existing
+consent store to integrate with (`docs/privacy-data.md` §6 records the
+absence); the consent screen (`/settings/ads`, en/fr/ar) is the only writer,
+through explicit Allow / Don't allow / Decide-later actions of equal weight.
 
 ## 9. Offline behavior
 
@@ -123,9 +127,10 @@ Deterministic and bounded:
   the failure *duration* is bounded by the 15-minute cache TTL.
 - A stale Pro grant lapses — it never becomes an indefinite `NO_ADS`. Tested
   with a deterministically stale cache.
-- After a restart there is no cached state at all (nothing is persisted), so
-  offline-from-install behaves as Free-unknown-consent: ineligible until the
-  server is reached and consent is recorded.
+- After a restart there is no entitlement state (still in-memory only), while
+  consent restores from per-account storage on login. Offline-from-install
+  therefore behaves as Free-unknown-consent: ineligible until the server is
+  reached and consent is recorded or restored.
 
 ## 10. Provider abstraction
 
@@ -165,13 +170,16 @@ advertising purposes; there is no `isPro`/`showAds` branching anywhere. The
 widget never throws, never navigates, never intercepts gestures — its only
 non-empty output is the provider's own rendering.
 
-Screen mounting is deliberately deferred: a nothing-rendering widget that
-fires entitlement fetches does not belong in production screens yet. Mounting
-a slot is a two-line change per screen once a real provider exists; the
-component is proven standalone by widget tests. (An initial HomePage mounting
-was implemented, broke an existing router test via an unmocked entitlement
-fetch, and was reverted — the incident is recorded here so the reason
-survives: mount only with fill behind it.)
+Screen mounting (WS-SM): `home` at the end of the home scroll (below the
+record action, never displacing it) and `ride_summary` post-finish (above
+Done, never between the rider and leaving). Training, routes, and social
+slots stay unmounted pending a real provider and product review — the
+taxonomy defines them, nothing renders them. Mounting is what surfaced the
+one integration cost in this workstream: the home slot's entitlement fetch
+broke an existing router test whose mock predated `/me/entitlements`. The
+mock was updated to answer the endpoint (it simulates the backend, which has
+it), not the production code weakened — and the incident is why mounting
+stays at two screens until fill exists behind them.
 
 ## 13. Future provider integration
 
@@ -200,26 +208,34 @@ inventory mapping, fill/error dashboards, and the legal review §8 defers.
 
 ## 15. Testing
 
-- Mobile `test/ads_test.dart` (27 tests): taxonomy exactness and unknown
-  degradation; consent truth table; context key allowlist; no-op behavior;
+- Mobile `test/ads_test.dart` (policy, provider, widget, taxonomy, adapter,
+  catalog) and `test/ads_consent_test.dart` (store, persistence, consent
+  screen incl. fr/ar RTL, mounted-slot structure): taxonomy exactness and
+  unknown degradation; consent truth table and persistence across
+  logout/login/switch; context key allowlist; no-op and adapter behavior;
   all seven policy rules incl. expired/revoked/future/stale/missing/failed
   grants; logout and account-switch isolation; widget dark/filled/throwing/
-  unavailable/unknown paths; no fake analytics by construction.
-- Backend `tests/test_ads_no_ads_boundary.py` (15 tests): lifecycle,
-  isolation, immutability, route absence, response/log identifier sweeps,
-  `no_ads` metric labels without identity, and a table-name pin against
-  future impression/click/revenue tables.
-- Full suites: backend 963 + 15, mobile 603 + 27, all green (see report).
+  unavailable/unknown paths; exactly-two-mounted-slots pin; prohibited
+  screens clean; no fake analytics by construction.
+- Backend `tests/test_ads_no_ads_boundary.py` (15 tests) and
+  `tests/test_store_products.py` (7 tests): lifecycle, isolation,
+  immutability, route absence, response/log identifier sweeps, `no_ads`
+  metric labels without identity, table-name pin, catalog exactness and
+  unknown rejection, no-money rule, no verify/purchase routes, no
+  purchase-shaped OpenAPI surface.
+- Full suites: backend 978 + 22, mobile 630 + new consent/catalog tests,
+  all green (see report).
 
 ## 16. Known limitations
 
-1. Slots are unmounted: no screen shows even an eligible slot yet (§12).
-2. Consent has no UI: `recordChoice` is a test/future-UI hook; all real
-   sessions stay `unknown` (ineligible) until a consent screen exists.
+1. Two slots mounted (`home`, `ride_summary`); training, routes, and social
+   stay taxonomy-only pending a real provider and product review (§12).
+2. Consent copy awaits legal review; jurisdiction behavior (ATT, GDPR flows)
+   is explicitly deferred (§8).
 3. The 15-minute TTL bounds staleness but does not proactively refresh; a
    Pro grant expiring mid-TTL suppresses at most TTL-long.
-4. `contentCategory` is accepted but never populated — reserved for a future
-   coarse taxonomy, not free text.
+4. `contentCategory` carries slot defaults only — coarse by construction,
+   never rider data.
 5. No backend ad-policy endpoint exists, deliberately: `/me/entitlements`
    already carries everything the policy needs (§4 of the workstream brief).
 

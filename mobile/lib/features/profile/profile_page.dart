@@ -118,6 +118,17 @@ class ProfilePage extends ConsumerWidget {
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => context.go('/settings'),
                 ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+                // Advertising choices live next to settings rather than
+                // inside them: consent is a standalone decision with its own
+                // screen, not a toggle buried in a form.
+                ListTile(
+                  key: const Key('profile.adsConsent'),
+                  leading: const Icon(Icons.ads_click_outlined),
+                  title: Text(t.get('profile.adsConsent')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.go('/settings/ads'),
+                ),
               ],
             ),
           ),

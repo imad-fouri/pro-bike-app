@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../auth/presentation/auth_state.dart';
 import '../../ride/presentation/ride_providers.dart';
 import '../../subscriptions/domain/entitlement.dart';
 import '../../subscriptions/presentation/entitlement_providers.dart';
+import '../data/ad_consent_store.dart';
 import '../data/ad_provider.dart';
 import '../domain/ad_policy.dart';
 
@@ -21,24 +24,65 @@ final adAppVersionProvider = Provider<String>(
 /// widget changes, because none of them names a provider.
 final adProviderProvider = Provider<AdProvider>((_) => NoOpAdProvider());
 
-/// Advertising consent, session-tied like the entitlement cache.
+/// Where consent choices live. Secure per-account storage in production;
+/// overridden with [MemoryAdConsentStore] in tests.
+final adConsentStoreProvider = Provider<AdConsentStore>(
+  (_) => SecureAdConsentStore(),
+);
+
+/// Advertising consent, session-tied with per-account persistence.
 ///
-/// Starts [AdConsentState.unknown] — which refuses ads — and returns there
-/// the moment authentication ends, so one rider's choice never follows the
-/// device into the next session. [recordChoice] is the hook the future
-/// consent UI will call; today only tests call it. Nothing here is persisted:
-/// a restart forgets the choice, which fails closed back to unknown.
+/// Starts [AdConsentState.unknown] — which refuses ads — restores the
+/// account's stored choice when one exists, and returns to unknown the
+/// moment authentication ends. Restoration is keyed by account id, so one
+/// rider's choice never follows the device into the next session, while a
+/// returning rider finds their own choice intact.
+///
+/// [recordChoice] is the hook the consent screen calls. Persistence is
+/// best-effort: the in-memory state is set first and is authoritative for
+/// the session, so a storage failure loses the choice on restart (failing
+/// closed back to unknown) but never loses it mid-session.
 class AdConsentNotifier extends Notifier<AdConsentState> {
   @override
   AdConsentState build() {
     final auth = ref.watch(authProvider);
-    if (!auth.isAuthenticated) return AdConsentState.unknown;
+    final userId = auth.user?.id;
+    if (!auth.isAuthenticated || userId == null) {
+      return AdConsentState.unknown;
+    }
+    unawaited(restore(userId));
     return AdConsentState.unknown;
   }
 
-  void recordChoice(AdConsentState choice) {
-    if (!ref.read(authProvider).isAuthenticated) return;
+  /// Reload the stored choice for [userId], defaulting to the current
+  /// session's rider. Public so tests and refresh flows can await it;
+  /// [build] already calls it for every new session.
+  Future<void> restore([String? userId]) async {
+    userId ??= ref.read(authProvider).user?.id;
+    if (userId == null) return;
+    AdConsentState? stored;
+    try {
+      stored = await ref.read(adConsentStoreProvider).load(userId);
+    } catch (_) {
+      return;
+    }
+    if (stored == null) return;
+    // The rider may have switched while the read was in flight: only apply
+    // a choice that still belongs to the current session.
+    if (ref.read(authProvider).user?.id != userId) return;
+    state = stored;
+  }
+
+  Future<void> recordChoice(AdConsentState choice) async {
+    final userId = ref.read(authProvider).user?.id;
+    if (userId == null) return;
     state = choice;
+    try {
+      await ref.read(adConsentStoreProvider).save(userId, choice);
+    } catch (_) {
+      // Best-effort persistence (see class docs): the session keeps the
+      // choice; a restart forgets it rather than crashing.
+    }
   }
 }
 
