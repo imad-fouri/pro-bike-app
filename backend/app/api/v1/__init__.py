@@ -12,6 +12,7 @@ from app.api.v1.profile import router as profile_router
 from app.api.v1.rides import router as rides_router
 from app.api.v1.routes import router as routes_router
 from app.api.v1.social import router as social_router
+from app.api.v1.store import router as store_router
 from app.api.v1.teams import router as teams_router
 from app.api.v1.training import router as training_router
 from app.api.v1.training import workout_router
@@ -24,6 +25,7 @@ v1.include_router(bikes_router)
 v1.include_router(rides_router)
 v1.include_router(routes_router)
 v1.include_router(social_router)
+v1.include_router(store_router)
 v1.include_router(teams_router)
 v1.include_router(chat_router)
 v1.include_router(group_rides_router)

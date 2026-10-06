@@ -105,4 +105,10 @@ async def test_openapi_has_no_purchase_or_billing_surface(client):
         for segment in path.strip("/").split("/")
         if segment.lower() in forbidden
     ]
-    assert hits == [], f"purchase-shaped routes exist: {hits}"
+    # WS-PV adds exactly two authenticated verification routes. They are the
+    # only purchase-shaped paths allowed to exist; anything else is a new
+    # billing surface that must update this test deliberately.
+    assert set(hits) == {
+        "/api/v1/store/purchases/verify",
+        "/api/v1/store/purchases/restore",
+    }, f"unexpected purchase-shaped routes: {hits}"

@@ -20,6 +20,7 @@ eventually supply:
   must verify the provider signature before parsing.
 """
 
+import enum
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -28,6 +29,20 @@ from typing import Protocol
 
 from app.models.subscription import Plan, SubscriptionProvider, SubscriptionStatus
 from app.services.subscription_service import ProviderSubscriptionEvent
+
+
+class VerificationEnvironment(str, enum.Enum):
+    """Where the provider says the purchase lives.
+
+    Both Apple and Google expose a sandbox/production distinction; this enum
+    is the provider-neutral form of it. The value always comes FROM a
+    verification response — never from a client request — which is what makes
+    the sandbox-on-production rejection meaningful rather than theatrical.
+    """
+
+    SANDBOX = "sandbox"
+    PRODUCTION = "production"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -48,6 +63,14 @@ class VerifiedPurchase:
     current_period_end: datetime
     occurred_at: datetime
     provider_event_id: str
+    # Phase 10 WS-PV additions. All defaulted, so existing constructors are
+    # unaffected. `product_id` binds the verification to the catalog entry
+    # the caller claimed; `environment` gates sandbox purchases off
+    # production; `cancel_at_period_end` carries end-of-period cancellation
+    # through reconciliation.
+    product_id: str | None = None
+    environment: VerificationEnvironment = VerificationEnvironment.UNKNOWN
+    cancel_at_period_end: bool = False
 
 
 @dataclass(frozen=True)

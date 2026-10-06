@@ -105,6 +105,7 @@ from the request.
 | `subscription_events_total` | counter | `event`, `provider`, `status` | Applied / duplicate-ignored / out-of-order-ignored, by origin and resulting status |
 | `entitlement_checks_total` | counter | `feature`, `outcome`, `plan` | Allowed / denied capability decisions, by caller plan |
 | `entitlement_denials_total` | counter | `feature`, `plan` | Denials kept separate so they cannot hide in an aggregate |
+| `purchase_verifications_total` | counter | `outcome`, `provider` | Verified / rejected / unavailable / error purchase attempts; no identity, token, or transaction labels |
 
 **`route` is the matched path template, never the raw path.**
 `/api/v1/group-rides/8f3a…` is unbounded — one series per ride, forever.

@@ -411,6 +411,17 @@ def record_entitlement_denial(*, feature: str, plan: str) -> None:
     metrics.increment("entitlement_denials_total", feature=feature, plan=plan)
 
 
+def record_purchase_verification(*, outcome: str, provider: str) -> None:
+    """Count one purchase verification attempt.
+
+    ``outcome`` is one of verified/rejected/unavailable/error; ``provider``
+    is a registered origin or the literal "unknown". The purchase token,
+    product id as given, user, and transaction ids are never labels — the
+    first two are unbounded client input, the rest are identifiers.
+    """
+    metrics.increment("purchase_verifications_total", outcome=outcome, provider=provider)
+
+
 def allowed_label_names() -> Iterable[str]:
     return sorted(_ALLOWED_LABEL_NAMES)
 

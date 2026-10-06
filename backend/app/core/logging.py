@@ -41,6 +41,10 @@ _SENSITIVE_SUBSTRINGS = (
     "apikey",
     "authorization",
     "email",
+    # Phase 10 WS-PV — purchase receipts are credential-shaped bearer data:
+    # whoever holds the receipt string can replay the purchase. No `receipt`
+    # key exists in the codebase today, so this is purely forward-looking.
+    "receipt",
 )
 
 #: Matched as an EXACT key name.
