@@ -1,11 +1,8 @@
 # Phase 10 — WS-AF: Ads Foundation / Store Monetization Readiness
 
 Status: **PASS**
-Run: [`<run-id>`](https://github.com/imad-fouri/pro-bike-app/actions) · backend **success** · mobile **success**
-Branch: `master` · Commit: `<final-sha>` · Baseline: `06ff966` · Date: 2026-10-06
-
-> Run id and commit filled at push time. Until then this report is complete
-> but unverified; see §8.
+Run: [`37461382207`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37461382207) · backend **success** · mobile **success**
+Branch: `master` · Commit: `c909576` · Baseline: `06ff966` · Date: 2026-10-06
 
 ---
 
@@ -100,8 +97,8 @@ Deferred: every network, SDK, billing, legal, and store item in
 **`WS-AF STATUS: PASS`**
 
 BASELINE: `06ff966`
-FINAL COMMIT: `<final-sha>`
-CI: PASS — run `<run-id>`, backend success, mobile success
+FINAL COMMIT: `c909576`
+CI: PASS — run `37461382207`, backend success, mobile success
 BACKEND: 978 passed, 0 failed
 MOBILE: 630 passed, 0 failed
 MIGRATION: none (0012_subscriptions head unchanged, cycle green)
