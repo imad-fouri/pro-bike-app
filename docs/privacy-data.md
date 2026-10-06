@@ -459,7 +459,9 @@ Not implemented. Recorded here as a known gap.
 - Account deletion, erasure requests, ownership transfer, admin hierarchy
 - Data export / portability (only GPX **route** export exists; there is no ride,
   training, chat or social export)
-- Consent and policy-acceptance records
+- Consent and policy-acceptance records (advertising consent is a session-tied
+  product state, not a legal record — see `docs/ads-foundation.md` §8)
+- Advertising SDK, ad inventory, impressions, clicks, revenue, ad identifiers
 - Location history for a rider's own past rides beyond their own stored points
 
 ---
