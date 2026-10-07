@@ -422,6 +422,18 @@ def record_purchase_verification(*, outcome: str, provider: str) -> None:
     metrics.increment("purchase_verifications_total", outcome=outcome, provider=provider)
 
 
+def record_competition_event(*, event: str, outcome: str) -> None:
+    """Count one ranking or challenge operation.
+
+    ``event`` is a closed vocabulary of competition verbs (create, publish,
+    join, leave, cancel, complete, rankings_query); ``outcome`` is one of
+    ok/rejected/error. A challenge id, a team id, a rider, and a score are
+    never labels — they would be per-object series with no operator to watch
+    them, and the score would leak movement in a leaderboard.
+    """
+    metrics.increment("competition_events_total", event=event, outcome=outcome)
+
+
 def allowed_label_names() -> Iterable[str]:
     return sorted(_ALLOWED_LABEL_NAMES)
 

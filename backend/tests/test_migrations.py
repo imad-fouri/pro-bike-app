@@ -38,6 +38,14 @@ PHASE84 = {"push_devices", "notifications"}
 # appears here, the privacy decision was quietly reversed.
 PHASE89 = {"group_rides", "group_ride_participants"}
 PHASE10 = {"subscriptions", "entitlements"}
+# Phase 10 WS-RC — challenges. Rankings need no table: the engine aggregates
+# rides on read, so this phase is purely the challenge ledger/membership set.
+PHASERC = {
+    "challenges",
+    "challenge_memberships",
+    "challenge_progress_events",
+    "challenge_completions",
+}
 BASE = {
     "users",
     "user_profiles",
@@ -48,8 +56,10 @@ BASE = {
     "rides",
     "ride_points",
 }
-EXPECTED = BASE | PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10
-ALL_PHASES = PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10
+EXPECTED = (
+    BASE | PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10 | PHASERC
+)
+ALL_PHASES = PHASE5 | PHASE6 | PHASE81 | PHASE82 | PHASE83 | PHASE84 | PHASE89 | PHASE10 | PHASERC
 
 SENSOR_COLUMNS = {"power_w", "hr_bpm", "cadence_rpm"}
 
@@ -321,16 +331,31 @@ async def test_migration_upgrade_downgrade_upgrade():
     assert (("source_subscription_id",), ("id",), "CASCADE") in entitlement_fks
     assert (("user_id",), ("id",), "CASCADE") in set(_foreign_keys("subscriptions").values())
 
+    # Phase 10 WS-RC — challenges. The four tables make three impossibilities:
+    # a rider cannot hold two memberships in one challenge, a ride cannot be
+    # credited twice to one challenge, and a rider cannot be awarded twice.
+    assert PHASERC <= tables  # 0013 challenge tables present
+    assert "uq_challenge_memberships_pair" in _constraints("challenge_memberships")
+    assert "uq_challenge_progress_challenge_ride" in _constraints("challenge_progress_events")
+    assert "uq_challenge_completions_pair" in _constraints("challenge_completions")
+    assert "ix_challenges_status_end" in _indexes("challenges")
+    assert "ix_challenge_memberships_user" in _indexes("challenge_memberships")
+
+    command.downgrade(cfg, "-1")  # 0013 -> 0012
+    tables = _tables()
+    assert PHASERC.isdisjoint(tables)  # challenge tables removed
+    assert PHASE10 <= tables  # …while 0012 subscriptions remain untouched
+
     command.downgrade(cfg, "-1")  # 0012 -> 0011
     tables = _tables()
     assert PHASE10.isdisjoint(tables)  # subscription tables removed
-    assert EXPECTED - PHASE10 <= tables  # …while 0011 and below remain
+    assert EXPECTED - PHASE10 - PHASERC <= tables  # …while 0011 and below remain
     assert PHASE89 <= tables  # group-ride tables untouched by the WS-S downgrade
 
     command.downgrade(cfg, "-1")  # 0011 -> 0010
     tables = _tables()
     assert PHASE89.isdisjoint(tables)  # group-ride tables removed
-    assert EXPECTED - PHASE10 - PHASE89 <= tables  # …while 0010 and below remain
+    assert EXPECTED - PHASE10 - PHASE89 - PHASERC <= tables  # …while 0010 and below remain
     assert PHASE84 <= tables  # notification tables untouched by the group-ride downgrade
     assert PHASE83 <= tables  # chat tables untouched: the enum was rebuilt, not replaced
     # The widened conversation CHECK is restored to the 0009 name and shape, so a
@@ -342,7 +367,9 @@ async def test_migration_upgrade_downgrade_upgrade():
     command.downgrade(cfg, "-1")  # 0010 -> 0009
     tables = _tables()
     assert PHASE84.isdisjoint(tables)  # notification tables removed
-    assert EXPECTED - PHASE10 - PHASE84 - PHASE89 <= tables  # …while 0009 and below remain
+    assert (
+        EXPECTED - PHASE10 - PHASE84 - PHASE89 - PHASERC <= tables
+    )  # …while 0009 and below remain
     assert PHASE83 <= tables  # chat tables untouched by the notification downgrade
 
     command.downgrade(cfg, "-1")  # 0009 -> 0008
@@ -382,6 +409,10 @@ async def test_migration_upgrade_downgrade_upgrade():
     assert EXPECTED <= _tables()
     assert _ride_route_columns() == {"route_id", "route_version"}
     assert SENSOR_COLUMNS <= _columns("ride_points")
+    assert PHASERC <= _tables()  # …and the WS-RC tables come back with their invariants
+    assert "uq_challenge_memberships_pair" in _constraints("challenge_memberships")
+    assert "uq_challenge_progress_challenge_ride" in _constraints("challenge_progress_events")
+    assert "uq_challenge_completions_pair" in _constraints("challenge_completions")
     for table, expected in CHAT_COLUMNS.items():
         assert expected <= _columns(table), f"{table} lost a column on re-apply"
     for table, expected in NOTIFICATION_COLUMNS.items():

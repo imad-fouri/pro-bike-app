@@ -12,6 +12,10 @@ import '../../features/bikes/presentation/bike_form_page.dart';
 import '../../features/bikes/presentation/bike_list_page.dart';
 import '../../features/chat/presentation/chat_inbox_page.dart';
 import '../../features/chat/presentation/conversation_page.dart';
+import '../../features/competition/presentation/challenge_detail_page.dart';
+import '../../features/competition/presentation/challenge_form_page.dart';
+import '../../features/competition/presentation/challenges_page.dart';
+import '../../features/competition/presentation/rankings_page.dart';
 import '../../features/group_rides/domain/group_ride.dart';
 import '../../features/group_rides/presentation/group_ride_detail_page.dart';
 import '../../features/group_rides/presentation/group_ride_form_page.dart';
@@ -264,7 +268,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       // needs its own route so profile, settings, and future first-run flows
       // can all link to the same decision point.
       GoRoute(path: '/settings/ads', builder: (c, s) => const ConsentPage()),
-      for (final p in ['/rides', '/performance', '/settings'])
+
+      // Phase 10 — WS-RC: rankings and challenges. '/performance' leaves the
+      // placeholder loop below; the nav tab that pointed at a placeholder now
+      // lands on a real leaderboard.
+      GoRoute(path: '/performance', builder: (c, s) => const RankingsPage()),
+      GoRoute(path: '/challenges', builder: (c, s) => const ChallengesPage()),
+      // Registered BEFORE `/challenges/:id` so "new" can never be read as a
+      // challenge id — same load-bearing order as `/group-rides/new`.
+      GoRoute(
+        path: '/challenges/new',
+        builder: (c, s) => const ChallengeFormPage(),
+      ),
+      GoRoute(
+        path: '/challenges/:id',
+        builder: (c, s) =>
+            ChallengeDetailPage(challengeId: s.pathParameters['id']!),
+      ),
+      for (final p in ['/rides', '/settings'])
         GoRoute(
           path: p,
           builder: (c, s) => PlaceholderPage(title: p),

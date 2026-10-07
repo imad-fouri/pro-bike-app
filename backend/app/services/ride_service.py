@@ -153,12 +153,14 @@ async def transition(db: AsyncSession, ride: Ride, target: RideStatus) -> Ride:
     await db.commit()
     await db.refresh(ride)
     if target == RideStatus.COMPLETED:
-        # A completed ride automatically feeds the training engine (Phase 6).
-        # Imported lazily to keep the domain modules acyclic, and it can never
-        # fail the ride: sync_ride logs and defers to the reanalyze endpoint.
-        from app.services import training_service
+        # A completed ride automatically feeds the training engine (Phase 6)
+        # and the challenge engine (WS-RC). Imported lazily to keep the domain
+        # modules acyclic, and neither can ever fail the ride: both log and
+        # defer repair, exactly like sync_ride's reanalyze endpoint.
+        from app.services import challenge_service, training_service
 
         await training_service.sync_ride(db, ride)
+        await challenge_service.on_ride_completed(db, ride)
     return ride
 
 

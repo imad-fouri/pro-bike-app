@@ -1,4 +1,15 @@
 from app.models.bike import Bike, BikeCategory, BikeStatus  # noqa: F401
+from app.models.challenge import (  # noqa: F401
+    Challenge,
+    ChallengeCompletion,
+    ChallengeMembership,
+    ChallengeMetric,
+    ChallengeProgressEvent,
+    ChallengeScope,
+    ChallengeStatus,
+    ChallengeVisibility,
+    ParticipantState,
+)
 from app.models.chat import (  # noqa: F401
     Conversation,
     ConversationKind,
