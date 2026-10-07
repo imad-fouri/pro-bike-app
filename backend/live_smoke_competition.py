@@ -24,6 +24,13 @@ The scenario has four riders (A, B, C, D):
 Server authority is exercised directly: request bodies that try to smuggle
 ``progress`` / ``score`` / ``rank`` / ``points_awarded`` must get 422, and
 every number on every response is an output, never echoed from a request.
+
+Repeated runs: accounts are unique per run, but registration is limited to
+10/hour per IP and login to 20/10min per IP, kept in-process per server process
+(``app/core/rate_limit.py``). Two consecutive runs use exactly 8 of the 10
+registrations, so ``1`` then ``2`` pass against a freshly started single-worker
+dev server; a further burst hits 429 until the window or a dev-server restart.
+The limiter is deliberately not disabled and there is no bypass header.
 """
 
 import asyncio
@@ -31,6 +38,7 @@ import json
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import httpx
 
@@ -91,6 +99,16 @@ def rid(u: dict) -> str:
 
 def now(delta_min: int = 0) -> str:
     return (datetime.now(UTC) + timedelta(minutes=delta_min)).isoformat()
+
+
+def numeric_value(value) -> Decimal:
+    """Normalize any client-visible numeric wire form to a comparable Decimal.
+
+    The API emits Decimal-backed aggregates as JSON strings (``"6671.70"``),
+    and a plain number would also be legal; comparing either form without
+    normalization is how the script must never do its own math on a wire value.
+    """
+    return Decimal(str(value))
 
 
 async def befriend(client: httpx.AsyncClient, a: dict, b: dict) -> bool:
@@ -310,19 +328,32 @@ async def scenario(client: httpx.AsyncClient, run: int) -> None:
 
     r = await client.get(f"{CHALLENGES}/{team_id}/leaderboard", headers=B["headers"])
     board = r.json()
+    _rows = [
+        {"rank": rank_of(x), "value": x["value"], "user_id": x["user_id"]}
+        for x in board.get("items", [])
+    ]
     check(
         "9. B reads the leaderboard (empty so far, ranks, both at 0)",
         r.status_code == 200
         and board["total"] == 2
-        and all(x["value"] == 0 for x in board["items"]),
-        f"total={board['total']}",
+        and len(_rows) == 2
+        and all(numeric_value(x["value"]) == 0 for x in _rows),
+        f"total={board['total']} items={_rows}",
     )
 
-    r = await client.get(f"{CHALLENGES}", headers=C["headers"])
+    r = await client.get(f"{CHALLENGES}", headers=D["headers"])
+    _page = r.json().get("items", [])
     check(
         "10. a private team challenge is absent from a non-participant's list",
-        r.status_code == 200 and all(c["id"] != team_id for c in r.json()["items"]),
-        "not listed",
+        r.status_code == 200 and all(c["id"] != team_id for c in _page),
+        f"listed_for_D={'yes' if any(c['id'] == team_id for c in _page) else 'no'}",
+    )
+    r = await client.get(f"{CHALLENGES}", headers=C["headers"])
+    _page = r.json().get("items", [])
+    check(
+        "   a participant does see the private team challenge in their list",
+        r.status_code == 200 and any(c["id"] == team_id for c in _page),
+        f"listed_for_C={'yes' if any(c['id'] == team_id for c in _page) else 'no'}",
     )
 
     # --- leave / rejoin resets the clock (no retroactive credit) -------------
@@ -360,7 +391,10 @@ async def scenario(client: httpx.AsyncClient, run: int) -> None:
     me = next((x for x in board["items"] if x["user_id"] == rid(B)), None)
     check(
         "   leaderboard now ranks B first with a positive value",
-        board["total"] == 2 and me is not None and rank_of(me) == 1 and me["value"] > 0,
+        board["total"] == 2
+        and me is not None
+        and rank_of(me) == 1
+        and numeric_value(me["value"]) > 0,
         f"rank={rank_of(me) if me else None} value={me['value'] if me else None}",
     )
 
