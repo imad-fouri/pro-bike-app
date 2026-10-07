@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.bike import Bike, BikeStatus
 from app.models.ride import Ride, RidePoint, RideStatus
 from app.schemas.ride import PointIn
-from app.services import gps_engine, route_service
+from app.services import activity_integrity, gps_engine, route_service
 from app.services.gps_engine import EngineState, GpsConfig, Observation
 from app.services.route_service import RouteError
 
@@ -326,7 +326,15 @@ async def ingest(
 
 
 async def _finalize(db: AsyncSession, ride: Ride) -> None:
-    """Deterministic summary from accepted points ordered by seq."""
+    """Deterministic summary from accepted points ordered by seq.
+
+    Runs inside ``transition`` before the ``COMPLETED`` commit, and computes
+    the WS-AC integrity verdict on the same facts, so the verdict lands
+    atomically with the finish: a ride is either completed-and-verdict-cached
+    or still in progress, never one without the other.
+    """
+    from app.core.metrics import record_competition_event
+
     res = await db.execute(
         select(RidePoint)
         .where(RidePoint.ride_id == ride.id, RidePoint.accepted.is_(True))
@@ -344,6 +352,10 @@ async def _finalize(db: AsyncSession, ride: Ride) -> None:
         )
         for p in res.scalars()
     ]
+    # The cumulative total folded during ingest, captured before the finish-path
+    # recompute; the only cross-check the integrity verdict has against a
+    # maliciously-altered stored total.
+    pre_finalize_distance_m = ride.distance_m
     summary = gps_engine.recompute(obs)
     ride.distance_m = Decimal(str(summary["distance_m"]))
     ride.elevation_gain_m = Decimal(str(summary["elevation_gain_m"]))
@@ -354,6 +366,29 @@ async def _finalize(db: AsyncSession, ride: Ride) -> None:
     ride.ended_at = ended
     ride.elapsed_seconds = max(0, int((ended - ride.started_at).total_seconds()))
     ride.updated_at = _now()
+
+    # Fail-closed by default: a fault (not a rule verdict) must never become
+    # ACCEPTED. The verdict row is written as REJECTED and the fault is kept
+    # distinguishable from a rule rejection in logs and metrics.
+    try:
+        verdict = activity_integrity.evaluate(
+            ride, obs, pre_finalize_distance_m=pre_finalize_distance_m
+        )
+    except Exception:  # noqa: BLE001 - see fail-closed comment above
+        record_competition_event(event="integrity_evaluate", outcome="error")
+        ride.integrity_status = activity_integrity.IntegrityStatus.REJECTED
+        ride.integrity_calculation_version = activity_integrity.CALCULATION_VERSION
+        ride.integrity_rules_triggered = ["EVALUATION_FAULT"]
+        ride.integrity_evaluated_at = _now()
+        return
+    # A bounded three-way counter: accepted / suspicious / rejected. Bounded
+    # because the label values are the enum; ride ids, coordinates and rule
+    # sets never touch a metric (app/core/metrics.py).
+    record_competition_event(event="integrity_evaluate", outcome=verdict.status.value)
+    ride.integrity_status = verdict.status
+    ride.integrity_calculation_version = verdict.calculation_version
+    ride.integrity_rules_triggered = verdict.rules_triggered
+    ride.integrity_evaluated_at = verdict.evaluated_at
 
 
 async def list_page(

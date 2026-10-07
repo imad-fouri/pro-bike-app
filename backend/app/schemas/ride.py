@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.models.ride import RideStatus
+from app.models.ride import IntegrityStatus, RideStatus
 
 MAX_CHUNK = 500
 
@@ -70,6 +70,11 @@ class RideOut(BaseModel):
     end_lon: Decimal | None
     route_id: uuid.UUID | None = None
     route_version: int | None = None
+    # WS-AC: read-only verdict for the ride's OWNER - ``None`` until the ride is
+    # completed and evaluated. This is an output only: there is no input field
+    # with this name anywhere in the request surface, so a client can never
+    # assert its own eligibility (it can only observe the server's verdict).
+    integrity_status: IntegrityStatus | None = None
 
 
 class RideRouteLink(BaseModel):

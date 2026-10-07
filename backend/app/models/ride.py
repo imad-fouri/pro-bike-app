@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import NUMERIC, UUID
+from sqlalchemy.dialects.postgresql import JSONB, NUMERIC, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -30,6 +30,23 @@ class RideStatus(str, enum.Enum):
     DISCARDED = "discarded"
     # NOTE: syncing/sync_failed are LOCAL-ONLY mobile states (sync protocol
     # doc). The server enum intentionally excludes them.
+
+
+class IntegrityStatus(str, enum.Enum):
+    """WS-AC vocabulary for a *completed* ride's integrity verdict.
+
+    ACCEPTED   eligible: aggregated, progress applied, points held.
+    SUSPICIOUS retained for history, excluded from competition (not eligible).
+    REJECTED   retained for audit, never aggregated, never eligible.
+
+    ``None`` (no verdict yet) is the value for rides that have not been
+    finalised; it is **not** eligible because the failure mode of "forgot to
+    evaluate" must be exclusion, never silent inclusion.
+    """
+
+    ACCEPTED = "accepted"
+    SUSPICIOUS = "suspicious"
+    REJECTED = "rejected"
 
 
 class Ride(Base):
@@ -91,6 +108,19 @@ class Ride(Base):
     start_lon: Mapped[Decimal | None] = mapped_column(NUMERIC(10, 6))
     end_lat: Mapped[Decimal | None] = mapped_column(NUMERIC(9, 6))
     end_lon: Mapped[Decimal | None] = mapped_column(NUMERIC(10, 6))
+    # WS-AC: the persisted integrity verdict, written exactly once by
+    # ``ride_service`` on finalisation and never by a request body. ``None``
+    # for in-progress rides means "not yet evaluated", which the eligibility
+    # predicate treats as not eligible (fail-closed). A recalc never rewrites
+    # an old verdict: a new rule set ships as a new ``calculation_version``
+    # with its own evaluation, so history keeps the version that produced it.
+    integrity_status: Mapped[IntegrityStatus | None] = mapped_column(
+        Enum(IntegrityStatus, name="integrity_status", values_callable=_values),
+        nullable=True,
+    )
+    integrity_calculation_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    integrity_rules_triggered: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    integrity_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

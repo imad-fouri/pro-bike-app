@@ -55,6 +55,7 @@ async def _out(db: AsyncSession, ride: object) -> RideOut:
         end_lon=ride.end_lon,
         route_id=ride.route_id,
         route_version=ride.route_version,
+        integrity_status=ride.integrity_status,
     )
 
 
