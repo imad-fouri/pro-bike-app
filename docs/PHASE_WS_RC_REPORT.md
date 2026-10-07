@@ -1,8 +1,8 @@
 # Phase 10 — WS-RC: Ranking & Challenges Foundation
 
 Status: **PASS**
-Run: [`<run-id>`](https://github.com/imad-fouri/pro-bike-app/actions/runs/<run-id>) · backend **success** · mobile **success**
-Branch: `master` · Commit: `<final-sha>` · Baseline: `55419b2` · Date: 2026-10-07
+Run: [`37572026961`](https://github.com/imad-fouri/pro-bike-app/actions/runs/37572026961) · backend **success** · mobile **success**
+Branch: `master` · Commit: `baccacb` · Baseline: `55419b2` · Date: 2026-10-07
 
 ---
 
@@ -147,8 +147,8 @@ every smuggled field. Returns non-zero on any failed step.
 **`WS-RC STATUS: PASS`**
 
 BASELINE: `55419b2`
-FINAL COMMIT: `<final-sha>`
-CI: PASS — run `<run-id>`, backend success, mobile success
+FINAL COMMIT: `baccacb`
+CI: PASS — run `37572026961`, backend success, mobile success
 BACKEND: 1045 passed, 0 failed
 MOBILE: 708 passed, 0 failed
 MIGRATION: `0013_rankings_challenges` (single head, cycle green)
