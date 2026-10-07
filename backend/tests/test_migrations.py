@@ -46,6 +46,14 @@ PHASERC = {
     "challenge_progress_events",
     "challenge_completions",
 }
+# Phase 11 WS-AC — the persisted integrity verdict lives on the existing
+# ``rides`` table, so the assertion is about columns, not tables.
+INTEGRITY_COLUMNS = {
+    "integrity_status",
+    "integrity_calculation_version",
+    "integrity_rules_triggered",
+    "integrity_evaluated_at",
+}
 BASE = {
     "users",
     "user_profiles",
@@ -341,6 +349,16 @@ async def test_migration_upgrade_downgrade_upgrade():
     assert "ix_challenges_status_end" in _indexes("challenges")
     assert "ix_challenge_memberships_user" in _indexes("challenge_memberships")
 
+    # Phase 11 WS-AC — the integrity verdict is a column family, not a table:
+    # the four columns appear at head, and the backfill labels legacy completed
+    # rides as accepted/v1 (provenance, never a re-evaluation).
+    assert INTEGRITY_COLUMNS <= _columns("rides")
+
+    command.downgrade(cfg, "-1")  # 0014 -> 0013
+    tables = _tables()
+    assert INTEGRITY_COLUMNS.isdisjoint(_columns("rides"))  # integrity columns removed
+    assert PHASERC <= tables  # …while 0013 challenge tables remain untouched
+
     command.downgrade(cfg, "-1")  # 0013 -> 0012
     tables = _tables()
     assert PHASERC.isdisjoint(tables)  # challenge tables removed
@@ -410,6 +428,7 @@ async def test_migration_upgrade_downgrade_upgrade():
     assert _ride_route_columns() == {"route_id", "route_version"}
     assert SENSOR_COLUMNS <= _columns("ride_points")
     assert PHASERC <= _tables()  # …and the WS-RC tables come back with their invariants
+    assert INTEGRITY_COLUMNS <= _columns("rides")  # …and so do the WS-AC columns
     assert "uq_challenge_memberships_pair" in _constraints("challenge_memberships")
     assert "uq_challenge_progress_challenge_ride" in _constraints("challenge_progress_events")
     assert "uq_challenge_completions_pair" in _constraints("challenge_completions")

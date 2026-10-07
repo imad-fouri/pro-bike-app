@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import update
 
-from app.models.ride import Ride, RideStatus
+from app.models.ride import IntegrityStatus, Ride, RideStatus
 from app.models.social import UserBlock
 from app.models.training import TrainingActivity
 from app.models.user import User, UserStatus
@@ -102,7 +102,14 @@ async def seed_ride(
     elevation_gain_m=0,
     ended_at=None,
 ) -> str:
-    """A completed ride with fabricated totals, straight into the source table."""
+    """A completed ride with fabricated totals, straight into the source table.
+
+    The ride is labelled a WS-AC ``ACCEPTED``/``v1`` fixture: these rows stand
+    in for rides the server itself finalised from accepted points, which is
+    what the competition engines are allowed to assume. Seeding them does not
+    invent a verdict any more than fabricating totals does - it names the
+    provenance the fixture already claimed.
+    """
     ended_at = ended_at or datetime.now(UTC)
     started_at = ended_at - timedelta(minutes=45)
     ride_id = uuid.uuid4()
@@ -123,6 +130,60 @@ async def seed_ride(
                 elevation_loss_m=Decimal(0),
                 average_speed_m_s=Decimal(0),
                 max_speed_m_s=Decimal(0),
+                integrity_status=IntegrityStatus.ACCEPTED,
+                integrity_calculation_version="v1",
+                integrity_rules_triggered=[],
+                integrity_evaluated_at=ended_at,
+                created_at=started_at,
+                updated_at=ended_at,
+            )
+        )
+        await s.commit()
+    return ride_id
+
+
+async def seed_integrity_ride(
+    factory,
+    user_id,
+    bike_id,
+    *,
+    status,
+    rules=(),
+    distance_m=0,
+    elevation_gain_m=0,
+    ended_at=None,
+) -> str:
+    """A completed ride carrying a non-accepted WS-AC verdict.
+
+    The API deliberately cannot produce a rejected/suspicious verdict (the
+    engine rejects impossible input before it can be stored), so these rows
+    are seeded directly - the same posture as the fabricated totals above.
+    They exist to prove the *consumers* exclude the activity correctly.
+    """
+    ended_at = ended_at or datetime.now(UTC)
+    started_at = ended_at - timedelta(minutes=45)
+    ride_id = uuid.uuid4()
+    async with factory() as s:
+        s.add(
+            Ride(
+                id=ride_id,
+                user_id=user_id,
+                bike_id=bike_id,
+                client_ride_uuid=uuid.uuid4(),
+                status=RideStatus.COMPLETED,
+                started_at=started_at,
+                ended_at=ended_at,
+                elapsed_seconds=2700,
+                moving_seconds=2520,
+                distance_m=Decimal(str(distance_m)),
+                elevation_gain_m=Decimal(str(elevation_gain_m)),
+                elevation_loss_m=Decimal(0),
+                average_speed_m_s=Decimal(0),
+                max_speed_m_s=Decimal(0),
+                integrity_status=status,
+                integrity_calculation_version="v1",
+                integrity_rules_triggered=list(rules),
+                integrity_evaluated_at=ended_at,
                 created_at=started_at,
                 updated_at=ended_at,
             )
