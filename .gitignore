@@ -28,3 +28,24 @@ Thumbs.db
 *.pem
 google-services.json
 GoogleService-Info.plist
+
+# WS-RP Phase 6 — live-store credentials. Apple App Store Connect API key
+# (.p8) and Google Play service-account JSON must live only outside Git (env /
+# secret store / mount); these patterns make it impossible to stage them.
+*.p8
+*.p12
+*service-account*
+*service_account*
+*application_default*
+*credentials*.json
+.GOOGLE_APPLICATION_CREDENTIALS
+
+# Junk / one-off artifacts (local-only, not part of the project)
+strava.apk
+uncommitted.txt
+diffstat.txt
+_fix_team_doubletap.py
+mobile/analyze.err
+mobile/analyze.out
+*.bak
+*.new
