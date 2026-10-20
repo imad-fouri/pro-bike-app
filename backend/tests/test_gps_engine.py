@@ -131,3 +131,52 @@ def test_single_point_ride_zeros():
     process(s, obs(0))
     summary = s.summary()
     assert summary["moving_seconds"] == 0 and summary["average_speed_m_s"] == 0.0
+
+
+def test_required_displacement_scales_with_accuracy():
+    from app.services.gps_engine import GpsConfig
+
+    cfg = GpsConfig()
+    assert cfg.required_displacement_m(None) == 8.0
+    assert cfg.required_displacement_m(4.0) == 4.0
+    assert cfg.required_displacement_m(2.0) == 3.0
+    assert cfg.required_displacement_m(20.0) == 20.0
+
+
+def test_stationary_jitter_meters_nothing():
+    s = EngineState()
+    process(s, obs(0, accuracy=10.0))
+    for i in range(1, 21):
+        wobble = STEP * 0.6 if i % 2 == 0 else -STEP * 0.6
+        v = process(s, obs(i, dlat=wobble, accuracy=10.0))
+        assert (v.accepted, v.reason) == (False, "stationary"), i
+    assert s.distance_m == 0.0
+    assert s.moving_s == 0.0
+    assert s.accepted_count == 1
+
+
+def test_slow_walk_preserved_not_hidden():
+    s = EngineState()
+    process(s, obs(0, accuracy=5.0))
+    # 0.5 m/s walk: 2.5 m per 5 s fix, under the moving threshold.
+    for i in range(1, 11):
+        process(s, obs(i, dlat=i * STEP * 0.25, accuracy=5.0))
+    assert s.distance_m == pytest.approx(25.0, abs=0.5)
+    assert s.moving_s == 0.0
+
+
+def test_elevation_ignored_while_stationary():
+    s = EngineState()
+    process(s, obs(0, alt=100.0, accuracy=10.0))
+    process(s, obs(1, alt=102.0, accuracy=10.0))
+    process(s, obs(2, alt=99.0, accuracy=10.0))
+    assert s.gain_m == 0.0
+    assert s.loss_m == 0.0
+
+
+def test_jump_does_not_poison_anchor():
+    s = EngineState()
+    process(s, obs(0))
+    assert process(s, obs(1, dlon=0.01, dt=1.0)).reason == "jump"
+    v = process(s, obs(2, dlat=STEP))
+    assert v.accepted and s.distance_m == pytest.approx(10.0, abs=0.5)

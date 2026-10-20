@@ -13,7 +13,10 @@ are grouped by the class of mistake they prevent:
 4. **Transport and network exposure.** Cleartext CORS, wildcard CORS,
    unauthenticated remote Redis holding live rider positions.
 5. **Contradictory feature flags.** "Enabled" with no provider means an operator
-   believes a subsystem is on when it is not.
+   believes a subsystem is on when it is not. The store-server notification
+   toggles are a special case: a webhook enabled without its trust boundary
+   (the provider adapter, and for Google OIDC push authentication) silently
+   serves 503s or accepts unauthenticated callbacks.
 6. **Revocability.** An access token that outlives account deletion.
 
 Nothing here reaches a database, a network, or a secret store: the gate is a pure
@@ -54,6 +57,8 @@ def production(**overrides) -> Settings:
         "AI_API_KEY": "",
         "PUSH_ENABLED": False,
         "PUSH_PROVIDER": "none",
+        "ROUTING_PROVIDER": "none",
+        "GEOCODING_PROVIDER": "none",
         "ACCESS_TOKEN_MINUTES": 15,
     }
     base.update(overrides)
@@ -361,6 +366,93 @@ def test_ai_disabled_with_a_stale_key_is_accepted():
 def test_push_enabled_with_no_provider_is_rejected():
     problems = production(PUSH_ENABLED=True, PUSH_PROVIDER="none").production_config_problems()
     assert any("PUSH_ENABLED" in p for p in problems)
+
+
+def test_apple_webhooks_enabled_without_the_store_adapter_is_rejected():
+    # "Webhooks on, adapter off" is a contradiction that silently serves 503s:
+    # the route would resolve no provider from the registry.
+    problems = production(APPLE_WEBHOOKS_ENABLED=True).production_config_problems()
+    assert any("APPLE_WEBHOOKS_ENABLED" in p for p in problems)
+
+
+def test_google_webhooks_enabled_without_the_store_adapter_is_rejected():
+    problems = production(GOOGLE_WEBHOOKS_ENABLED=True).production_config_problems()
+    assert any("GOOGLE_WEBHOOKS_ENABLED" in p for p in problems)
+
+
+def test_google_webhooks_enabled_without_oidc_push_auth_is_rejected():
+    # RTDN auth mode "none" accepts ANY push that reaches the URL, so in
+    # production it is a fail-open even when the adapter is configured.
+    problems = production(
+        GOOGLE_WEBHOOKS_ENABLED=True, GOOGLE_PLAY_ENABLED=True
+    ).production_config_problems()
+    assert any("GOOGLE_RTDN_AUTH_MODE" in p for p in problems)
+
+
+def test_oidc_push_auth_without_an_audience_is_rejected():
+    # A push token can only be verified against an expected audience.
+    problems = production(GOOGLE_RTDN_AUTH_MODE="oidc").production_config_problems()
+    assert any("GOOGLE_RTDN_OIDC_AUDIENCE" in p for p in problems)
+
+
+def test_apple_store_enabled_requires_bootstrap_settings():
+    problems = production(APPLE_STORE_ENABLED=True).production_config_problems()
+    text = " ".join(problems)
+    for field in (
+        "APPLE_ISSUER_ID",
+        "APPLE_KEY_ID",
+        "APPLE_PRIVATE_KEY_PATH",
+        "APPLE_BUNDLE_ID",
+        "APPLE_ROOT_CERTS_PATH",
+        "APPLE_PRODUCT_PRO_MONTHLY",
+        "APPLE_PRODUCT_PRO_YEARLY",
+    ):
+        assert field in text
+
+
+def test_google_store_enabled_requires_bootstrap_settings():
+    problems = production(GOOGLE_PLAY_ENABLED=True).production_config_problems()
+    text = " ".join(problems)
+    for field in (
+        "GOOGLE_APPLICATION_CREDENTIALS_PATH",
+        "GOOGLE_PACKAGE_NAME",
+        "GOOGLE_PRODUCT_PRO_MONTHLY",
+        "GOOGLE_PRODUCT_PRO_YEARLY",
+    ):
+        assert field in text
+
+
+def test_apple_store_rejects_an_unknown_api_environment():
+    problems = production(
+        APPLE_STORE_ENABLED=True, APPLE_API_ENVIRONMENT="staging"
+    ).production_config_problems()
+    assert "APPLE_API_ENVIRONMENT" in " ".join(problems)
+
+
+def test_a_fully_configured_webhook_deployment_passes():
+    assert (
+        production(
+            APPLE_STORE_ENABLED=True,
+            APPLE_ISSUER_ID="69a6de83-0000-47e3-e053-5b8c7c11a4d1",
+            APPLE_KEY_ID="TESTKEY",
+            APPLE_PRIVATE_KEY_PATH="/run/secrets/apple.p8",
+            APPLE_BUNDLE_ID="com.cyclecoach.app",
+            APPLE_ROOT_CERTS_PATH="/run/secrets/apple-roots.pem",
+            APPLE_API_ENVIRONMENT="production",
+            APPLE_PRODUCT_PRO_MONTHLY="com.example.cyclecoach.pro.monthly",
+            APPLE_PRODUCT_PRO_YEARLY="com.example.cyclecoach.pro.yearly",
+            APPLE_WEBHOOKS_ENABLED=True,
+            GOOGLE_PLAY_ENABLED=True,
+            GOOGLE_APPLICATION_CREDENTIALS_PATH="/run/secrets/google-service-account.json",
+            GOOGLE_PACKAGE_NAME="com.cyclecoach.android",
+            GOOGLE_PRODUCT_PRO_MONTHLY="cyclecoach.pro.monthly",
+            GOOGLE_PRODUCT_PRO_YEARLY="cyclecoach.pro.yearly",
+            GOOGLE_WEBHOOKS_ENABLED=True,
+            GOOGLE_RTDN_AUTH_MODE="oidc",
+            GOOGLE_RTDN_OIDC_AUDIENCE="projects/cyclecoach/subscriptions/store-push",
+        ).production_config_problems()
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------

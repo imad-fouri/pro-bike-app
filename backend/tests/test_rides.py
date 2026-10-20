@@ -272,3 +272,164 @@ async def test_list_pagination(client):
         await _ride(client, h, bike)
     r = await client.get(f"{RIDES}?page=1&page_size=2", headers=h)
     assert (r.json()["total"], len(r.json()["items"])) == (3, 2)
+
+
+async def _completed_ride(client, h, bike, n=3):
+    ride = (await _ride(client, h, bike)).json()
+    pts = [pt(i, dlat=i * STEP, sec=i * 5) for i in range(n)]
+    r = await client.post(f"{RIDES}/{ride['id']}/points", json={"points": pts}, headers=h)
+    assert r.status_code == 200, r.text
+    f = await client.post(f"{RIDES}/{ride['id']}/finish", headers=h)
+    assert f.status_code == 200, f.text
+    return f.json()
+
+
+# --- history feed ---
+async def test_history_lists_completed_newest_first(client):
+    h = await _user(client, A)
+    bike = await _bike(client, h)
+    first = await _completed_ride(client, h, bike)
+    second = await _completed_ride(client, h, bike)
+    r = await client.get(f"{RIDES}?status=completed", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    ids = [item["id"] for item in body["items"]]
+    assert ids == [second["id"], first["id"]]
+    for item in body["items"]:
+        assert item["status"] == "completed"
+        assert float(item["summary"]["distance_m"]) == abs(20.0) or (
+            19.0 < float(item["summary"]["distance_m"]) < 21.0
+        )
+
+
+async def test_history_empty(client):
+    h = await _user(client, A)
+    r = await client.get(f"{RIDES}?status=completed", headers=h)
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+
+async def test_history_status_filter(client):
+    h = await _user(client, A)
+    bike = await _bike(client, h)
+    await _completed_ride(client, h, bike)
+    await _ride(client, h, bike)  # still recording
+    done = await client.get(f"{RIDES}?status=completed", headers=h)
+    assert done.json()["total"] == 1
+    everything = await client.get(RIDES, headers=h)
+    assert everything.json()["total"] == 2
+
+
+async def test_history_cross_user_isolated(client):
+    ha = await _user(client, A)
+    hb = await _user(client, B)
+    ride = await _completed_ride(client, ha, await _bike(client, ha))
+    other = await client.get(f"{RIDES}?status=completed", headers=hb)
+    assert other.json()["total"] == 0
+    assert (await client.get(f"{RIDES}/{ride['id']}", headers=hb)).status_code == 404
+    assert (await client.get(f"{RIDES}/{ride['id']}/points", headers=hb)).status_code == 404
+
+
+async def test_history_pagination_invalid(client):
+    h = await _user(client, A)
+    assert (await client.get(f"{RIDES}?page=0", headers=h)).status_code == 422
+    assert (await client.get(f"{RIDES}?page_size=0", headers=h)).status_code == 422
+    assert (await client.get(f"{RIDES}?page_size=101", headers=h)).status_code == 422
+
+
+async def test_ride_detail_not_found(client):
+    h = await _user(client, A)
+    r = await client.get(f"{RIDES}/{uuid.uuid4()}", headers=h)
+    assert r.status_code == 404
+
+
+# --- detail geometry ---
+async def test_ride_points_ordered_and_bounded(client):
+    h = await _user(client, A)
+    ride = await _completed_ride(client, h, await _bike(client, h), n=5)
+    r = await client.get(f"{RIDES}/{ride['id']}/points", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 5 and body["truncated"] is False
+    seqs = [p["seq"] for p in body["points"]]
+    assert seqs == [0, 1, 2, 3, 4]
+    assert all("lat" in p and "lon" in p for p in body["points"])
+    first = body["points"][0]
+    assert abs(float(first["lat"]) - LAT) < 1e-9
+
+
+async def test_ride_points_truncation_flag(client):
+    h = await _user(client, A)
+    ride = await _completed_ride(client, h, await _bike(client, h), n=5)
+    r = await client.get(f"{RIDES}/{ride['id']}/points?limit=2", headers=h)
+    body = r.json()
+    assert len(body["points"]) == 2 and body["total"] == 5
+    assert body["truncated"] is True
+    assert [p["seq"] for p in body["points"]] == [0, 1]
+
+
+async def test_ride_points_empty_ride(client):
+    h = await _user(client, A)
+    ride = (await _ride(client, h, await _bike(client, h))).json()
+    await client.post(f"{RIDES}/{ride['id']}/finish", headers=h)
+    r = await client.get(f"{RIDES}/{ride['id']}/points", headers=h)
+    assert r.json() == {"points": [], "total": 0, "truncated": False}
+
+
+# --- dashboard aggregates ---
+async def test_overview_aggregates_completed_only(client):
+    h = await _user(client, A)
+    bike = await _bike(client, h)
+    await _completed_ride(client, h, bike)
+    await _completed_ride(client, h, bike)
+    await _ride(client, h, bike)  # recording: excluded
+    r = await client.get(f"{RIDES}/stats/overview", headers=h)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_rides"] == 2
+    assert 39.0 < float(body["total_distance_m"]) < 41.0
+    assert body["total_moving_seconds"] == 20
+    assert float(body["total_elevation_gain_m"]) == 0.0
+    # Created now: inside the current UTC week and month alike.
+    assert abs(float(body["week_distance_m"]) - float(body["total_distance_m"])) < 0.01
+    assert abs(float(body["month_distance_m"]) - float(body["total_distance_m"])) < 0.01
+    assert "week_start" in body and "month_start" in body
+
+
+async def test_overview_empty(client):
+    h = await _user(client, A)
+    r = await client.get(f"{RIDES}/stats/overview", headers=h)
+    body = r.json()
+    assert body["total_rides"] == 0
+    assert float(body["total_distance_m"]) == 0.0
+    assert body["total_moving_seconds"] == 0
+
+
+async def test_overview_cross_user_isolated(client):
+    ha = await _user(client, A)
+    hb = await _user(client, B)
+    await _completed_ride(client, ha, await _bike(client, ha))
+    r = await client.get(f"{RIDES}/stats/overview", headers=hb)
+    assert r.json()["total_rides"] == 0
+
+
+def test_week_month_boundaries():
+    from app.services.ride_service import _week_month_starts
+
+    # Monday 2026-05-04 12:00 UTC: week starts today at midnight.
+    week, month = _week_month_starts(datetime(2026, 5, 4, 12, 0, tzinfo=UTC))
+    assert week == datetime(2026, 5, 4, 0, 0, tzinfo=UTC)
+    assert month == datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    # Sunday 2026-05-10 23:59 UTC: same week, same month.
+    week, month = _week_month_starts(datetime(2026, 5, 10, 23, 59, tzinfo=UTC))
+    assert week == datetime(2026, 5, 4, 0, 0, tzinfo=UTC)
+    assert month == datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    # Sunday 2026-05-31: week still May, month still May.
+    week, month = _week_month_starts(datetime(2026, 5, 31, 12, 0, tzinfo=UTC))
+    assert week == datetime(2026, 5, 25, 0, 0, tzinfo=UTC)
+    assert month == datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    # Monday 2026-06-01: new week AND new month.
+    week, month = _week_month_starts(datetime(2026, 6, 1, 0, 1, tzinfo=UTC))
+    assert week == datetime(2026, 6, 1, 0, 0, tzinfo=UTC)
+    assert month == datetime(2026, 6, 1, 0, 0, tzinfo=UTC)

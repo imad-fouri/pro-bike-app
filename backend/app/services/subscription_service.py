@@ -105,7 +105,12 @@ class ProviderSubscriptionEvent:
     cancel_at_period_end: bool = False
 
     def __post_init__(self) -> None:
-        _require_text(self.provider_subscription_id, "provider_subscription_id")
+        # Google Play purchase tokens are opaque, unbounded strings (the lookup
+        # token IS the stable external subscription identity, audit §8.1) and
+        # routinely exceed 128 characters, so the subscription identity column
+        # was widened to 1024 (migration 0015). The EVENT id stays bounded by
+        # construction (digests), so it keeps the 128 limit.
+        _require_text(self.provider_subscription_id, "provider_subscription_id", limit=1024)
         _require_text(self.provider_event_id, "provider_event_id")
         _require_aware(self.effective_start, "effective_start")
         _require_aware(self.effective_end, "effective_end")
@@ -241,15 +246,20 @@ def _stale(existing: Subscription, event: ProviderSubscriptionEvent) -> bool:
 
     Provider callbacks can arrive out of order. An older cancellation must not
     undo a newer renewal, and an older renewal must not resurrect a newer
-    cancellation. Equal timestamps are tie-broken by event id so the decision
-    is deterministic rather than arrival-order dependent.
+    cancellation, so the comparison is on provider event time. Two events with
+    equal timestamps carry no ordering information — and, because provider
+    event ids are now bounded digests rather than readable timelines, their id
+    order is arbitrary rather than meaningful — so equal timestamps are never
+    stale: the idempotency guard (identical event id) already handled the
+    duplicate case, and distinct events with equal timestamps are both applied
+    (WS-RP §8.3).
     """
     last_at = existing.last_provider_event_at
     if last_at is None:
         return False
     if event.occurred_at != last_at:
         return event.occurred_at < last_at
-    return event.provider_event_id < (existing.last_provider_event_id or "")
+    return False
 
 
 async def apply_provider_event(db: AsyncSession, event: ProviderSubscriptionEvent) -> Subscription:

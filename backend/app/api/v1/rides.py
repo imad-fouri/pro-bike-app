@@ -17,7 +17,10 @@ from app.schemas.ride import (
     RideCreate,
     RideOut,
     RidePage,
+    RidePointOut,
+    RidePointsOut,
     RideRouteLink,
+    RidesOverviewOut,
     RideSummary,
 )
 from app.services import ride_service
@@ -95,6 +98,15 @@ async def list_rides(
     )
 
 
+@router.get("/stats/overview")
+async def rides_overview(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RidesOverviewOut:
+    """Dashboard aggregates. Completed rides only; UTC calendar windows."""
+    return RidesOverviewOut(**await ride_service.rides_overview(db, user.id))
+
+
 @router.get("/{ride_id}")
 async def get_ride(
     ride_id: uuid.UUID,
@@ -106,6 +118,30 @@ async def get_ride(
     except RideError as e:
         raise _err(e) from e
     return await _out(db, ride)
+
+
+@router.get("/{ride_id}/points")
+async def get_ride_points(
+    ride_id: uuid.UUID,
+    limit: int = Query(default=2000, ge=1, le=5000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RidePointsOut:
+    """Accepted fixes for the detail map, oldest first, bounded.
+
+    Ownership enforced (404 for foreign/missing rides). Rejected fixes are
+    excluded; `truncated` tells the client when the trail exceeds `limit`.
+    """
+    try:
+        ride = await ride_service.get_owned(db, user.id, ride_id)
+    except RideError as e:
+        raise _err(e) from e
+    points, total, truncated = await ride_service.ride_points(db, ride, limit)
+    return RidePointsOut(
+        points=[RidePointOut(seq=p.seq, lat=p.lat, lon=p.lon, alt=p.alt) for p in points],
+        total=total,
+        truncated=truncated,
+    )
 
 
 @router.post("/{ride_id}/route", response_model=RideOut)

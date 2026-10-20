@@ -93,6 +93,46 @@ class RoutePointOut(BaseModel):
     ele: Decimal | None
 
 
+class GeocodeResult(BaseModel):
+    """One place match: display name plus WGS84 coordinates. No geometry."""
+
+    name: str
+    lat: float
+    lon: float
+
+
+class GeocodeResults(BaseModel):
+    query: str
+    results: list[GeocodeResult]
+
+
+class PlanWaypoint(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+class PlanRequest(BaseModel):
+    points: list[PlanWaypoint] = Field(min_length=2, max_length=25)
+    profile: str = "cycling"
+
+
+class PlanPoint(BaseModel):
+    lat: float
+    lon: float
+
+
+class PlanResult(BaseModel):
+    """Provider-calculated cycling geometry. Distance/duration are the
+    provider's own estimates; elevation is intentionally absent (no DEM
+    source — see ADR-09). Exactly what the provider returned: one route,
+    never invented alternatives."""
+
+    points: list[PlanPoint]
+    distance_m: float
+    duration_s: float
+    profile: str
+
+
 class RouteGeometry(BaseModel):
     route_id: uuid.UUID
     version_no: int

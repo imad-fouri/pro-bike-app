@@ -252,10 +252,14 @@ async def _ftp_from_ride(
 
 
 async def _ride_samples(db: AsyncSession, ride: Ride) -> list[SensorSample]:
-    """Accepted points only, as sensor samples.
+    """Metered fixes plus stationary holds, as sensor samples.
 
-    Rejected fixes never contribute: analysis must agree with the canonical ride
-    metrics, which also ignore them (ADR-10 §6).
+    Rejected fixes never contribute — except `stationary` holds, which are
+    valid measurements without confident displacement (standing still,
+    track stands, trainer-style efforts). Their power/HR/cadence data is
+    real; only distance/moving/elevation metering ignores them, and those
+    come from the canonical ride columns, not from these samples — so
+    analysis still agrees with the ride metrics (ADR-10 §6).
     """
     res = await db.execute(
         select(
@@ -264,7 +268,10 @@ async def _ride_samples(db: AsyncSession, ride: Ride) -> list[SensorSample]:
             RidePoint.hr_bpm,
             RidePoint.cadence_rpm,
         )
-        .where(RidePoint.ride_id == ride.id, RidePoint.accepted.is_(True))
+        .where(
+            RidePoint.ride_id == ride.id,
+            (RidePoint.accepted.is_(True)) | (RidePoint.reject_reason == "stationary"),
+        )
         .order_by(RidePoint.seq)
     )
     return [

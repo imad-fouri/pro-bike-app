@@ -16,6 +16,13 @@ SPEED_MAX_M_S = 80.0  # GPS-reported speed above: ignored for metrics
 ELEVATION_THRESHOLD_M = 3.0  # smaller deltas are noise, not climbing
 MOVING_THRESHOLD_M_S = 1.0  # segment speed at/above: moving time
 DUPLICATE_DISTANCE_M = 1.0  # same seq/time within 1 m: duplicate
+# Confidence anchor: a move must clear max(MIN_CONFIDENT_DISPLACEMENT_M,
+# effective_accuracy * CONFIDENCE_FACTOR) to move the meters, where
+# effective_accuracy is the reported accuracy or DEFAULT_ACCURACY_M when the
+# platform reports none. Stationary jitter advances bookkeeping, never meters.
+CONFIDENCE_FACTOR = 1.0
+MIN_CONFIDENT_DISPLACEMENT_M = 3.0
+DEFAULT_ACCURACY_M = 8.0
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,14 @@ class GpsConfig:
     jump_speed_reject_m_s: float = JUMP_SPEED_REJECT_M_S
     elevation_threshold_m: float = ELEVATION_THRESHOLD_M
     moving_threshold_m_s: float = MOVING_THRESHOLD_M_S
+    confidence_factor: float = CONFIDENCE_FACTOR
+    min_confident_displacement_m: float = MIN_CONFIDENT_DISPLACEMENT_M
+    default_accuracy_m: float = DEFAULT_ACCURACY_M
+
+    def required_displacement_m(self, accuracy: float | None) -> float:
+        effective = DEFAULT_ACCURACY_M if accuracy is None else accuracy
+        scaled = effective * self.confidence_factor
+        return max(self.min_confident_displacement_m, scaled)
 
 
 @dataclass(frozen=True)
@@ -48,6 +63,10 @@ class EngineState:
     last_lon: float | None = None
     last_time: float | None = None
     last_seq: int | None = None
+    # Confidence anchor: last fix that moved the meters.
+    anchor_lat: float | None = None
+    anchor_lon: float | None = None
+    anchor_time: float | None = None
     ele_baseline: float | None = None
     first_time: float | None = None
     distance_m: float = 0.0
@@ -63,6 +82,7 @@ class EngineState:
         Elevation baseline persists (altitude is absolute, not relative).
         """
         self.last_lat = self.last_lon = self.last_time = None
+        self.anchor_lat = self.anchor_lon = self.anchor_time = None
 
     def summary(self) -> dict:
         elapsed = (
@@ -87,7 +107,7 @@ class EngineState:
 class Verdict:
     accepted: bool
     reason: str  # ok | invalid_coords | bad_accuracy | duplicate | out_of_order
-    # time_regression | jump | bad_speed | paused
+    # time_regression | jump | bad_speed | paused | stationary
     distance_m: float = 0.0
     dt_s: float = 0.0
     moving: bool = False
@@ -124,33 +144,53 @@ def process(state: EngineState, obs: Observation, cfg: GpsConfig = GpsConfig()) 
         state.last_seq = obs.seq
         if state.first_time is None:
             state.first_time = obs.recorded_at
+        if state.anchor_lat is None:
+            state.anchor_lat, state.anchor_lon = obs.lat, obs.lon
+            state.anchor_time = obs.recorded_at
         if obs.alt is not None and state.ele_baseline is None:
             state.ele_baseline = obs.alt
         state.accepted_count += 1
         return Verdict(True, "ok")
 
     assert state.last_lon is not None
-    dist = haversine_m(state.last_lat, state.last_lon, obs.lat, obs.lon)
-    dt = obs.recorded_at - state.last_time
-    if dt <= 0:
+    fix_dist = haversine_m(state.last_lat, state.last_lon, obs.lat, obs.lon)
+    fix_dt = obs.recorded_at - state.last_time
+    if fix_dt <= 0:
         return Verdict(False, "time_regression")
-    if dist < DUPLICATE_DISTANCE_M and dt < 1.0:
+    if fix_dist < DUPLICATE_DISTANCE_M and fix_dt < 1.0:
         # Same fix re-delivered (Android/iOS callback duplication).
         state.last_seq = obs.seq
         return Verdict(False, "duplicate")
-    implied = dist / dt
-    if implied > cfg.jump_speed_reject_m_s:
-        # Impossible jump: do NOT advance baseline (keeps one glitch from
-        # poisoning the next good fix), but record seq so a retry isn't
-        # misread as out-of-order… actually keep last_seq so the *next*
-        # point is judged against the last good fix. Do not update anything.
-        return Verdict(False, "jump", distance_m=round(dist, 2), dt_s=round(dt, 3))
+    fix_speed = fix_dist / fix_dt
+    if fix_speed > cfg.jump_speed_reject_m_s:
+        # Impossible jump: do NOT advance anything, so one glitch cannot
+        # poison the next good fix.
+        return Verdict(False, "jump", distance_m=round(fix_dist, 2), dt_s=round(fix_dt, 3))
+    state.max_speed_m_s = max(state.max_speed_m_s, fix_speed)
 
+    if state.anchor_lat is None or state.anchor_time is None:
+        # Rebuilt continuity without an anchor (defensive: ingest always
+        # restores both): adopt the last fix so metering continues instead
+        # of failing.
+        state.anchor_lat, state.anchor_lon = state.last_lat, state.last_lon
+        state.anchor_time = state.last_time
+    assert state.anchor_lon is not None
+    seg_dist = haversine_m(state.anchor_lat, state.anchor_lon, obs.lat, obs.lon)
+    if seg_dist < cfg.required_displacement_m(obs.accuracy):
+        # Stationary jitter (or sub-confidence shuffle): advance continuity
+        # bookkeeping so later points judge against fresh state, but move no
+        # meters and touch no elevation baseline.
+        state.last_lat, state.last_lon = obs.lat, obs.lon
+        state.last_time = obs.recorded_at
+        state.last_seq = obs.seq
+        return Verdict(False, "stationary")
+
+    seg_dt = obs.recorded_at - state.anchor_time
+    implied = seg_dist / seg_dt
     moving = implied >= cfg.moving_threshold_m_s
-    state.distance_m += dist
+    state.distance_m += seg_dist
     if moving:
-        state.moving_s += dt
-    state.max_speed_m_s = max(state.max_speed_m_s, implied)
+        state.moving_s += seg_dt
     if obs.alt is not None:
         if state.ele_baseline is None:
             state.ele_baseline = obs.alt
@@ -164,9 +204,11 @@ def process(state: EngineState, obs: Observation, cfg: GpsConfig = GpsConfig()) 
                 state.ele_baseline = obs.alt
     state.last_lat, state.last_lon = obs.lat, obs.lon
     state.last_time = obs.recorded_at
+    state.anchor_lat, state.anchor_lon = obs.lat, obs.lon
+    state.anchor_time = obs.recorded_at
     state.last_seq = obs.seq
     state.accepted_count += 1
-    return Verdict(True, "ok", distance_m=round(dist, 2), dt_s=round(dt, 3), moving=moving)
+    return Verdict(True, "ok", distance_m=round(seg_dist, 2), dt_s=round(seg_dt, 3), moving=moving)
 
 
 def recompute(points: list[Observation], cfg: GpsConfig = GpsConfig()) -> dict:

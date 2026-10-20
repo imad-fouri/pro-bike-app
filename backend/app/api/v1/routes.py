@@ -26,7 +26,12 @@ from app.db.session import get_db
 from app.models.route import RouteActivityType, RoutePrivacy, RouteStatus
 from app.models.user import User
 from app.schemas.route import (
+    GeocodeResult,
+    GeocodeResults,
     GpxImportResult,
+    PlanPoint,
+    PlanRequest,
+    PlanResult,
     RouteCreate,
     RouteDetail,
     RouteGeometry,
@@ -39,7 +44,8 @@ from app.schemas.route import (
     SortField,
     SortOrder,
 )
-from app.services import route_service
+from app.services import route_planner, route_service
+from app.services.route_planner import PlannerError
 from app.services.route_service import RouteError
 
 router = APIRouter(prefix="/routes", tags=["routes"])
@@ -52,6 +58,10 @@ def _limit(request: Request, user: User, key: str = "routes", limit: int = 120) 
 
 
 def _err(e: RouteError) -> HTTPException:
+    return HTTPException(status_code=e.status, detail={"code": e.code, "message": e.message})
+
+
+def _planner_err(e: PlannerError) -> HTTPException:
     return HTTPException(status_code=e.status, detail={"code": e.code, "message": e.message})
 
 
@@ -75,6 +85,54 @@ async def _detail(db: AsyncSession, route: object, include_geometry: bool) -> Ro
             elevation_profile=version.elevation_profile,
         )
     return RouteDetail(**base, geometry=geometry)
+
+
+@router.get("/geocode", response_model=GeocodeResults)
+async def geocode_places(
+    request: Request,
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=5, ge=1, le=10),
+    user: User = Depends(get_current_user),
+) -> GeocodeResults:
+    """Place search via the configured geocoder (Nominatim by default).
+
+    Empty queries and unknown places return empty results, not errors.
+    Fair use is enforced here (per-user rate limit) plus client debounce;
+    the service adds a bounded result cache.
+    """
+    _limit(request, user, key="route-geocode", limit=30)
+    try:
+        results = await route_planner.geocode(q, limit=limit)
+    except PlannerError as e:
+        raise _planner_err(e) from e
+    return GeocodeResults(query=q, results=[GeocodeResult(**r) for r in results])
+
+
+@router.post("/plan", response_model=PlanResult)
+async def plan_cycling_route(
+    data: PlanRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> PlanResult:
+    """Cycling route for 2..25 waypoints via the configured router.
+
+    Returns the provider's own geometry, distance, and duration estimates —
+    exactly one route, never invented alternatives, and no elevation (no
+    DEM source; see ADR-09).
+    """
+    _limit(request, user, key="route-plan", limit=60)
+    try:
+        result = await route_planner.plan_route(
+            [(p.lat, p.lon) for p in data.points], profile=data.profile
+        )
+    except PlannerError as e:
+        raise _planner_err(e) from e
+    return PlanResult(
+        points=[PlanPoint(**p) for p in result["points"]],
+        distance_m=result["distance_m"],
+        duration_s=result["duration_s"],
+        profile=result["profile"],
+    )
 
 
 @router.post("/import/gpx", response_model=GpxImportResult, status_code=201)

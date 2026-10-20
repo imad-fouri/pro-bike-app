@@ -134,7 +134,7 @@ class Subscription(Base):
         Enum(SubscriptionProvider, name="subscription_provider", values_callable=_values),
         nullable=False,
     )
-    provider_subscription_id: Mapped[str | None] = mapped_column(String(128))
+    provider_subscription_id: Mapped[str | None] = mapped_column(String(1024))
     plan: Mapped[Plan] = mapped_column(
         Enum(Plan, name="subscription_plan", values_callable=_values), nullable=False
     )

@@ -20,6 +20,10 @@ dependencies = [
   "arq>=0.26",
   "httpx>=0.27",
   "pyjwt>=2.8",  # access tokens (HS256); refresh tokens are opaque, not JWT
+  # ES256/RS256 signing + validation for purchase-provider integration: Apple
+  # App Store Server API calls and JWS transaction verification, and Google
+  # Play service-account JWT grants (WS-RP Phases 3-4).
+  "cryptography>=42",
   "argon2-cffi>=23.1",  # Argon2id password hashing
   "email-validator>=2.0",  # EmailStr validation in auth schemas
   "python-multipart>=0.0.9",  # GPX upload via multipart/form-data (Phase 5)

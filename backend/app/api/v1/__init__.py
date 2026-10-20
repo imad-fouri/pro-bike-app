@@ -18,6 +18,7 @@ from app.api.v1.store import router as store_router
 from app.api.v1.teams import router as teams_router
 from app.api.v1.training import router as training_router
 from app.api.v1.training import workout_router
+from app.api.v1.webhooks import router as webhooks_router
 
 v1 = APIRouter()
 v1.include_router(health_router)
@@ -38,3 +39,4 @@ v1.include_router(workout_router)
 v1.include_router(coach_router)
 v1.include_router(rankings_router)
 v1.include_router(challenges_router)
+v1.include_router(webhooks_router)

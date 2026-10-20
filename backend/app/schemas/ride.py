@@ -96,3 +96,36 @@ class RidePage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class RidePointOut(BaseModel):
+    """One accepted GPS fix for the detail map. Metered points only."""
+
+    seq: int
+    lat: Decimal
+    lon: Decimal
+    alt: Decimal | None = None
+
+
+class RidePointsOut(BaseModel):
+    points: list[RidePointOut]
+    total: int
+    truncated: bool
+
+
+class RidesOverviewOut(BaseModel):
+    """Dashboard aggregates over COMPLETED rides only (see rides_overview).
+
+    All boundaries are UTC calendar boundaries, returned alongside the
+    totals so clients never guess the window: week runs Monday 00:00 UTC,
+    month runs from the 1st 00:00 UTC.
+    """
+
+    total_rides: int
+    total_distance_m: Decimal
+    total_moving_seconds: int
+    total_elevation_gain_m: Decimal
+    week_distance_m: Decimal
+    month_distance_m: Decimal
+    week_start: datetime
+    month_start: datetime

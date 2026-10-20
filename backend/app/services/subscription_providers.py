@@ -71,6 +71,12 @@ class VerifiedPurchase:
     product_id: str | None = None
     environment: VerificationEnvironment = VerificationEnvironment.UNKNOWN
     cancel_at_period_end: bool = False
+    # WS-RP Phase 1: the provider's stable identity for THIS transaction/state
+    # snapshot (Apple `transactionId`; Google per-state stamp). It is folded
+    # into the derived provider event id so two distinct renewals that share a
+    # millisecond-granularity event time can never collide into one event.
+    # None keeps the WS-PV event identity for existing fakes and constructors.
+    provider_transaction_id: str | None = None
 
 
 @dataclass(frozen=True)

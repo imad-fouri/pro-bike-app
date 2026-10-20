@@ -1,10 +1,10 @@
 """Ride service: lifecycle, ownership, chunk ingest, deterministic finish."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -255,9 +255,13 @@ async def ingest(
     state = EngineState()
     if last is not None:
         # Anchor from the last accepted fix; full history recomputed at finish.
+        # The anchor is the last fix that moved the meters, so it is exactly
+        # the last accepted fix: rejected (held) fixes never accrue.
         state.last_lat, state.last_lon = float(last.lat), float(last.lon)
         state.last_time = last.recorded_at.timestamp()
         state.last_seq = last.seq
+        state.anchor_lat, state.anchor_lon = float(last.lat), float(last.lon)
+        state.anchor_time = last.recorded_at.timestamp()
         state.first_time = ride.started_at.timestamp()
         state.distance_m, state.gain_m = float(ride.distance_m), float(ride.elevation_gain_m)
         state.loss_m, state.moving_s = float(ride.elevation_loss_m), float(ride.moving_seconds)
@@ -409,6 +413,22 @@ async def list_page(
     return rides, total
 
 
+def _week_month_starts(now: datetime) -> tuple[datetime, datetime]:
+    """UTC calendar boundaries for dashboard windows.
+
+    Week runs Monday 00:00 UTC (weekday() == 0); month runs from the 1st
+    00:00 UTC. Naive datetimes are treated as UTC; stored timestamps are
+    tz-aware UTC, so comparisons stay consistent.
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return week_start, month_start
+
+
 async def summarize(db: AsyncSession, ride: Ride) -> dict:
     count = await _accepted_count(db, ride.id)
     if ride.status == RideStatus.COMPLETED and ride.ended_at is not None:
@@ -416,3 +436,77 @@ async def summarize(db: AsyncSession, ride: Ride) -> dict:
     elif ride.ended_at is None:
         ride.elapsed_seconds = max(0, int((_now() - ride.started_at).total_seconds()))
     return _summary_of(ride, count)
+
+
+#: Hard cap for one detail-map response (~5000 fixes ≈ 300 KB worst case).
+MAX_DETAIL_POINTS = 5000
+
+
+async def ride_points(
+    db: AsyncSession, ride: Ride, limit: int
+) -> tuple[list[RidePoint], int, bool]:
+    """Accepted fixes for the detail map, oldest first.
+
+    Takes an already-owned ride (callers enforce ownership via get_owned).
+    Returns (points, total_accepted, truncated). Rejected fixes are excluded:
+    the map draws exactly what the meters came from.
+    """
+    total_res = await db.execute(
+        select(func.count())
+        .select_from(RidePoint)
+        .where(RidePoint.ride_id == ride.id, RidePoint.accepted.is_(True))
+    )
+    total = total_res.scalar_one()
+    rows = (
+        (
+            await db.execute(
+                select(RidePoint)
+                .where(RidePoint.ride_id == ride.id, RidePoint.accepted.is_(True))
+                .order_by(RidePoint.seq.asc())
+                .limit(limit + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    truncated = len(rows) > limit
+    return list(rows[:limit]), total, truncated
+
+
+async def rides_overview(db: AsyncSession, user_id: uuid.UUID, now: datetime | None = None) -> dict:
+    """Dashboard aggregates over COMPLETED rides only, in one query.
+
+    A ride counts once by construction (single aggregate row per user).
+    Unfinished (recording/paused), discarded, and never-completed rides are
+    excluded. Boundaries are UTC calendar boundaries, returned with the
+    totals so clients never guess the window.
+    """
+    at = now or _now()
+    week_start, month_start = _week_month_starts(at)
+    res = await db.execute(
+        select(
+            func.count(),
+            func.coalesce(func.sum(Ride.distance_m), 0),
+            func.coalesce(func.sum(Ride.moving_seconds), 0),
+            func.coalesce(func.sum(Ride.elevation_gain_m), 0),
+            func.coalesce(
+                func.sum(case((Ride.started_at >= week_start, Ride.distance_m), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((Ride.started_at >= month_start, Ride.distance_m), else_=0)),
+                0,
+            ),
+        ).where(Ride.user_id == user_id, Ride.status == RideStatus.COMPLETED)
+    )
+    row = res.one()
+    return {
+        "total_rides": row[0],
+        "total_distance_m": row[1],
+        "total_moving_seconds": row[2],
+        "total_elevation_gain_m": row[3],
+        "week_distance_m": row[4],
+        "month_distance_m": row[5],
+        "week_start": week_start,
+        "month_start": month_start,
+    }

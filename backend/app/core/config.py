@@ -86,8 +86,19 @@ class Settings(BaseSettings):
     MAP_TILE_URL_TEMPLATE: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
     MAP_ATTRIBUTION: str = "© OpenStreetMap contributors"
     MAP_MAX_ZOOM: int = 19
-    ROUTING_PROVIDER: str = "none"  # none | osrm | graphhopper | mapbox | valhalla
-    GEOCODING_PROVIDER: str = "none"  # none | nominatim | photon | mapbox
+    ROUTING_PROVIDER: str = "osrm"  # none | osrm | graphhopper | mapbox | valhalla
+    GEOCODING_PROVIDER: str = "nominatim"  # none | nominatim | photon | mapbox
+    # Phase D — keyless public providers, proxied server-side. The defaults
+    # below are development-grade (no signup, no quota): production must point
+    # these at self-hosted or contracted endpoints (see the production gate).
+    ROUTING_OSRM_BASE_URL: str = "https://router.project-osrm.org"
+    GEOCODING_NOMINATIM_BASE_URL: str = "https://nominatim.openstreetmap.org"
+    ROUTING_OSRM_PROFILE: str = "bike"
+    ROUTING_TIMEOUT_SECONDS: int = 15
+    GEOCODING_TIMEOUT_SECONDS: int = 10
+    GEOCODING_MAX_RESULTS: int = 5
+    GEOCODING_CACHE_SECONDS: int = 86400
+    ROUTING_MAX_WAYPOINTS: int = 25
     ROUTE_MAX_POINTS: int = 5000
     GPX_MAX_BYTES: int = 5 * 1024 * 1024
     GPX_MAX_NODES: int = 200000
@@ -134,6 +145,78 @@ class Settings(BaseSettings):
     # they are the record, and skipping them would lose events. Only delivery is
     # bounded.
     PUSH_INLINE_FANOUT_LIMIT: int = 20
+
+    # WS-RP Phase 3/6 — App Store Server API verification. The adapter enters
+    # the registry only when ENABLED and fully configured (see the adapter's
+    # `configured()`); every field defaults off so the provider registry stays
+    # empty and honest until a deployment is actually ready. None of the
+    # secret values ever leave the server: they are read for signing the
+    # caller JWT only, never logged, echoed, or labeled.
+    APPLE_STORE_ENABLED: bool = False
+    # Which App Store Server API base URL the SERVER decides to call:
+    # "production" (api.storekit.apple.com) or "sandbox"
+    # (api.storekit-sandbox.apple.com). The environment of a purchase is then
+    # taken from the verified transaction's own signed `environment` field,
+    # never from the client.
+    APPLE_API_ENVIRONMENT: str = "production"
+    APPLE_BUNDLE_ID: str = ""
+    APPLE_ISSUER_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY_PATH: str = ""
+    # PEM bundle of Apple's published App Store Server API root certificates,
+    # the trust anchors the adapter validates every signed transaction JWS
+    # chain against. Empty means no chain trust; verification fails closed.
+    APPLE_ROOT_CERTS_PATH: str = ""
+    APPLE_REQUEST_TIMEOUT_SECONDS: int = 10
+    # Server-owned App Store product bindings. These provider-side IDs are
+    # bound to the canonical internal PRO monthly/yearly products during
+    # startup. Empty means the Apple provider cannot start completely.
+    APPLE_PRODUCT_PRO_MONTHLY: str = ""
+    APPLE_PRODUCT_PRO_YEARLY: str = ""
+
+    # WS-RP Phase 4/6 — Google Play verification (purchases.subscriptionsv2.get).
+    # Same discipline as Apple: the adapter enters the registry only when
+    # ENABLED and fully configured; every field defaults off so the provider
+    # registry stays empty and honest until a deployment is ready. The
+    # service-account JSON is loaded server-side for the OAuth2 JWT assertion
+    # only; it, the resulting access token, and purchase tokens are never
+    # logged, labeled, echoed, or stored.
+    GOOGLE_PLAY_ENABLED: bool = False
+    # Android package/application identity the server enforces as the API
+    # request path and refuses to grant under a foreign package.
+    GOOGLE_PACKAGE_NAME: str = ""
+    # Path to the service-account JSON (type=service_account). Never committed.
+    GOOGLE_APPLICATION_CREDENTIALS_PATH: str = ""
+    GOOGLE_REQUEST_TIMEOUT_SECONDS: int = 10
+    # Server-owned Play product bindings, bound to the canonical internal PRO
+    # monthly/yearly products during startup. Empty means the Google provider
+    # cannot start completely.
+    GOOGLE_PRODUCT_PRO_MONTHLY: str = ""
+    GOOGLE_PRODUCT_PRO_YEARLY: str = ""
+
+    # Phase 10 — store server notifications (webhooks). Both routes consume the
+    # SAME provider adapters as verification (`process_event` -> the existing
+    # apply_provider_event pipeline); these toggles only expose that path over
+    # HTTP. Everything defaults OFF so no callback surface exists until an
+    # operator explicitly enables it, matching the provider ENABLED discipline
+    # above.
+    APPLE_WEBHOOKS_ENABLED: bool = False
+    GOOGLE_WEBHOOKS_ENABLED: bool = False
+    # Pub/Sub push authentication for RTDN. "none" accepts any push (local
+    # development only); "oidc" verifies the `Authorization: Bearer` OIDC push
+    # token against Google's published JWKS before the envelope is decoded.
+    # The production gate refuses anything but "oidc":
+    GOOGLE_RTDN_AUTH_MODE: str = "none"  # none | oidc
+    # The expected `aud` claim of the push token: the Pub/Sub subscription URL
+    # (`projects/<project>/subscriptions/<subscription>`). Empty means the
+    # verifier has nothing to require, so production gate fails.
+    GOOGLE_RTDN_OIDC_AUDIENCE: str = ""
+    # Expected `iss` claim of the push token. Pub/Sub issues its OIDC push
+    # tokens from accounts.google.com by default.
+    GOOGLE_RTDN_OIDC_ISSUER: str = "https://accounts.google.com"
+    # Where the push-token signing keys are published. Google's public JWKS;
+    # overridable for test/proxy setups.
+    GOOGLE_RTDN_JWKS_URI: str = "https://www.googleapis.com/oauth2/v3/certs"
 
     @property
     def is_production(self) -> bool:
@@ -297,6 +380,98 @@ class Settings(BaseSettings):
                 "deleted account would keep authenticating until it expires"
             )
 
+        # 10. Store providers enabled without their bootstrap requirements. A
+        #     webhook for a provider the deployment has not configured is a
+        #     contradiction that silently serves 503s; Google's push mode
+        #     without OIDC auth accepts ANY push that can reach the URL, which
+        #     is a fail-open in production. Each is listed by name only, never
+        #     by secret value.
+        if self.APPLE_STORE_ENABLED:
+            missing = [
+                name
+                for name, value in (
+                    ("APPLE_ISSUER_ID", self.APPLE_ISSUER_ID),
+                    ("APPLE_KEY_ID", self.APPLE_KEY_ID),
+                    ("APPLE_PRIVATE_KEY_PATH", self.APPLE_PRIVATE_KEY_PATH),
+                    ("APPLE_BUNDLE_ID", self.APPLE_BUNDLE_ID),
+                    ("APPLE_ROOT_CERTS_PATH", self.APPLE_ROOT_CERTS_PATH),
+                    ("APPLE_PRODUCT_PRO_MONTHLY", self.APPLE_PRODUCT_PRO_MONTHLY),
+                    ("APPLE_PRODUCT_PRO_YEARLY", self.APPLE_PRODUCT_PRO_YEARLY),
+                )
+                if not str(value or "").strip()
+            ]
+            if self.APPLE_API_ENVIRONMENT not in ("production", "sandbox"):
+                missing.append("APPLE_API_ENVIRONMENT")
+            if missing:
+                problems.append(
+                    "APPLE_STORE_ENABLED is true but required Apple bootstrap "
+                    f"settings are missing: {', '.join(missing)}"
+                )
+        if self.GOOGLE_PLAY_ENABLED:
+            missing = [
+                name
+                for name, value in (
+                    (
+                        "GOOGLE_APPLICATION_CREDENTIALS_PATH",
+                        self.GOOGLE_APPLICATION_CREDENTIALS_PATH,
+                    ),
+                    ("GOOGLE_PACKAGE_NAME", self.GOOGLE_PACKAGE_NAME),
+                    ("GOOGLE_PRODUCT_PRO_MONTHLY", self.GOOGLE_PRODUCT_PRO_MONTHLY),
+                    ("GOOGLE_PRODUCT_PRO_YEARLY", self.GOOGLE_PRODUCT_PRO_YEARLY),
+                )
+                if not str(value or "").strip()
+            ]
+            if missing:
+                problems.append(
+                    "GOOGLE_PLAY_ENABLED is true but required Google bootstrap "
+                    f"settings are missing: {', '.join(missing)}"
+                )
+        if self.APPLE_WEBHOOKS_ENABLED and not self.APPLE_STORE_ENABLED:
+            problems.append(
+                "APPLE_WEBHOOKS_ENABLED is true but APPLE_STORE_ENABLED is "
+                "false — an App Store webhook can only be trusted when the "
+                "adapter is configured"
+            )
+        if self.GOOGLE_WEBHOOKS_ENABLED and not self.GOOGLE_PLAY_ENABLED:
+            problems.append(
+                "GOOGLE_WEBHOOKS_ENABLED is true but GOOGLE_PLAY_ENABLED is "
+                "false — a Play RTDN webhook can only be trusted when the "
+                "adapter is configured"
+            )
+        if self.GOOGLE_WEBHOOKS_ENABLED and self.GOOGLE_RTDN_AUTH_MODE != "oidc":
+            problems.append(
+                "GOOGLE_WEBHOOKS_ENABLED is true but GOOGLE_RTDN_AUTH_MODE is "
+                "not 'oidc' — unauthenticated push callbacks must not be "
+                "accepted in production"
+            )
+        if self.GOOGLE_RTDN_AUTH_MODE == "oidc" and not self.GOOGLE_RTDN_OIDC_AUDIENCE.strip():
+            problems.append(
+                "GOOGLE_RTDN_AUTH_MODE is 'oidc' but GOOGLE_RTDN_OIDC_AUDIENCE "
+                "is empty — the push token has no audience to require"
+            )
+
+        # 11. Keyless demo routing/geocoding endpoints are development-grade:
+        # their terms discourage production-app traffic, so a production
+        # deployment must point at self-hosted or contracted endpoints (or
+        # disable the providers). Each is listed by name only.
+        if self.ROUTING_PROVIDER == "osrm" and self._is_demo_url(
+            self.ROUTING_OSRM_BASE_URL, "router.project-osrm.org"
+        ):
+            problems.append(
+                "ROUTING_PROVIDER is 'osrm' but ROUTING_OSRM_BASE_URL is the "
+                "public demo server — point it at a self-hosted OSRM instance "
+                "for production traffic"
+            )
+        if self.GEOCODING_PROVIDER == "nominatim" and self._is_demo_url(
+            self.GEOCODING_NOMINATIM_BASE_URL, "nominatim.openstreetmap.org"
+        ):
+            problems.append(
+                "GEOCODING_PROVIDER is 'nominatim' but "
+                "GEOCODING_NOMINATIM_BASE_URL is the public demo server — "
+                "point it at a self-hosted Nominatim instance for production "
+                "traffic"
+            )
+
         return problems
 
     def _redis_is_remote_without_auth(self) -> bool:
@@ -308,6 +483,15 @@ class Settings(BaseSettings):
         if not host or host in _LOOPBACK_HOSTS:
             return False
         return not parsed.password
+
+    @staticmethod
+    def _is_demo_url(url: str, demo_host: str) -> bool:
+        """Whether a provider base URL is the public demo deployment."""
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            return False
+        return host == demo_host or host.endswith(f".{demo_host}")
 
     def validate_production(self) -> None:
         """Fail closed before serving traffic.

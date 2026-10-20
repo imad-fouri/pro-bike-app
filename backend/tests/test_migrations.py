@@ -189,6 +189,15 @@ def _columns(table: str) -> set[str]:
         eng.dispose()
 
 
+def _column_type(table: str, column: str) -> str:
+    eng = create_engine(f"{BASE_URL}/{DBNAME}")
+    try:
+        cols = {c["name"]: c for c in inspect(eng).get_columns(table)}
+        return str(cols[column]["type"])
+    finally:
+        eng.dispose()
+
+
 def _ride_route_columns() -> set[str]:
     return _columns("rides") & {"route_id", "route_version"}
 
@@ -353,6 +362,16 @@ async def test_migration_upgrade_downgrade_upgrade():
     # the four columns appear at head, and the backfill labels legacy completed
     # rides as accepted/v1 (provenance, never a re-evaluation).
     assert INTEGRITY_COLUMNS <= _columns("rides")
+    # Store-webhook widening (0015): Google Play purchase tokens are opaque and
+    # unbounded, and the token IS the idempotency identity, so it must never be
+    # truncated at 128.
+    assert _column_type("subscriptions", "provider_subscription_id") == "VARCHAR(1024)"
+
+    command.downgrade(cfg, "-1")  # 0015 -> 0014
+    # ...and 0014 and everything below survive the webhook downgrade unharmed.
+    assert _column_type("subscriptions", "provider_subscription_id") == "VARCHAR(128)"
+    assert INTEGRITY_COLUMNS <= _columns("rides")
+    assert PHASERC <= _tables()
 
     command.downgrade(cfg, "-1")  # 0014 -> 0013
     tables = _tables()
@@ -429,6 +448,7 @@ async def test_migration_upgrade_downgrade_upgrade():
     assert SENSOR_COLUMNS <= _columns("ride_points")
     assert PHASERC <= _tables()  # …and the WS-RC tables come back with their invariants
     assert INTEGRITY_COLUMNS <= _columns("rides")  # …and so do the WS-AC columns
+    assert _column_type("subscriptions", "provider_subscription_id") == "VARCHAR(1024)"  # 0015
     assert "uq_challenge_memberships_pair" in _constraints("challenge_memberships")
     assert "uq_challenge_progress_challenge_ride" in _constraints("challenge_progress_events")
     assert "uq_challenge_completions_pair" in _constraints("challenge_completions")

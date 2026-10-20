@@ -265,6 +265,13 @@ def setup_logging(level: str, environment: str) -> logging.Logger:
     root = logging.getLogger()
     root.handlers = [handler]
     root.setLevel(level.upper())
+    # httpx logs one INFO line per outbound request containing the FULL URL,
+    # and the Google RTDN refetch URL embeds the purchase token as a path
+    # component (`.../tokens/{token}`). A literal purchase token in the log
+    # is a stored-credential leak, so the httpx client's request chatter is
+    # suppressed; WARNING-and-above (including terminal failures) still
+    # propagate through the app's own formatter and correlation filter.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     return logger
 
 

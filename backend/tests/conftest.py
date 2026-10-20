@@ -93,7 +93,10 @@ def _clear_rate_limits():
 
 @pytest.fixture
 def test_app():
-    return create_app()
+    # Shared test clients deliberately bypass store-provider bootstrap. Fixture
+    # tests configure and register isolated adapters after app construction;
+    # dedicated bootstrap tests exercise the default startup path directly.
+    return create_app(run_store_bootstrap=False)
 
 
 @pytest.fixture

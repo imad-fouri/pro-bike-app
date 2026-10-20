@@ -455,6 +455,8 @@ def test_production_disables_the_openapi_schema(monkeypatch):
     )
     monkeypatch.setattr(settings, "REDIS_URL", "redis://:pw@redis.internal:6379/0")
     monkeypatch.setattr(settings, "ACCESS_TOKEN_MINUTES", 15)
+    monkeypatch.setattr(settings, "ROUTING_PROVIDER", "none")
+    monkeypatch.setattr(settings, "GEOCODING_PROVIDER", "none")
 
     app = create_app()
     assert app.openapi_url is None

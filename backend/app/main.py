@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.logging import new_request_id, setup_logging
 from app.core.metrics import record_request
+from app.services.store_provider_bootstrap import bootstrap_store_providers
 
 setup_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 
@@ -43,13 +44,23 @@ def _route_template(request: Request) -> str:
     return request.url.path or "unknown"
 
 
-def create_app() -> FastAPI:
+def create_app(*, run_store_bootstrap: bool = True) -> FastAPI:
     # Fail closed before serving anything. Phase 10 widened this from the
     # SECRET_KEY-only check to the full production gate: an unsafe default
     # anywhere (dev email provider, cleartext CORS, DEBUG logging, the shipped
     # database URL, an unauthenticated remote Redis holding live positions) now
     # stops the process instead of serving production traffic.
     settings.validate_production()
+    # There is no FastAPI lifespan/startup hook in this application, so the
+    # factory performs the one startup step that must precede traffic: store
+    # provider bootstrap. With both providers disabled this is an explicit
+    # no-op, preserving development/test factory behavior and isolation.
+    # With a provider enabled, it either registers a fully valid provider
+    # stack or raises before the API object is returned. Shared test clients
+    # pass run_store_bootstrap=False so tests can configure isolated fixture
+    # providers after constructing the application.
+    if run_store_bootstrap and (settings.APPLE_STORE_ENABLED or settings.GOOGLE_PLAY_ENABLED):
+        bootstrap_store_providers()
     # Phase 10 security audit: `/openapi.json` is the complete route table —
     # every endpoint, parameter and schema — and needs no authentication. Left on
     # in production it hands an attacker the map of the API for free, including
