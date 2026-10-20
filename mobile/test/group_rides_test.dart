@@ -223,9 +223,14 @@ class FakeLocationSource implements LocationSource {
   }
 
   @override
+  Future<bool> hasBackgroundPermission() async => true;
+
+  @override
   Stream<GpsObservation> positions({
     required TrackingPolicy policy,
     required int Function() nextSeq,
+    String? foregroundTitle,
+    String? foregroundText,
   }) {
     requestedSeq.add(nextSeq());
     return _controller.stream;

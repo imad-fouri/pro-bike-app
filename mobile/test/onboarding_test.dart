@@ -3,6 +3,8 @@ import 'package:cyclecoach/core/network/api_client.dart';
 import 'package:cyclecoach/core/routing/app_router.dart';
 import 'package:cyclecoach/features/auth/domain/auth_user.dart';
 import 'package:cyclecoach/features/auth/presentation/auth_state.dart';
+import 'package:cyclecoach/features/auth/presentation/forgot_password_page.dart';
+import 'package:cyclecoach/features/auth/presentation/login_background.dart';
 import 'package:cyclecoach/features/auth/presentation/login_page.dart';
 import 'package:cyclecoach/features/auth/presentation/onboarding_page.dart';
 import 'package:cyclecoach/features/auth/presentation/register_page.dart';
@@ -53,6 +55,26 @@ Widget shell(AuthState state, {Locale locale = const Locale('en')}) {
   );
 }
 
+Widget authPage(Widget page) {
+  return ProviderScope(
+    overrides: [
+      authProvider.overrideWith(
+        () => _FixedAuth(const AuthState(AuthStatus.unauthenticated)),
+      ),
+    ],
+    child: MaterialApp(
+      supportedLocales: AppLocalizations.supported,
+      localizationsDelegates: const [
+        AppLocalizationsDelegate(),
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: page,
+    ),
+  );
+}
+
 void main() {
   testWidgets('shows the logo, tagline, pill and account link', (t) async {
     await t.pumpWidget(shell(const AuthState(AuthStatus.unauthenticated)));
@@ -74,7 +96,16 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.byType(RegisterPage), findsOneWidget);
+    expect(find.byType(AuthBackground), findsOneWidget);
     expect(find.byType(OnboardingPage), findsNothing);
+  });
+
+  testWidgets('forgot password uses the shared road backdrop', (t) async {
+    await t.pumpWidget(authPage(const ForgotPasswordPage()));
+    await t.pumpAndSettle();
+
+    expect(find.byType(ForgotPasswordPage), findsOneWidget);
+    expect(find.byType(AuthBackground), findsOneWidget);
   });
 
   testWidgets('already have an account → the glass login', (t) async {

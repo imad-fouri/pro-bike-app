@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cyclecoach/core/network/api_client.dart';
 import 'package:cyclecoach/core/storage/token_storage.dart';
 import 'package:cyclecoach/features/auth/data/auth_repository.dart';
+import 'package:cyclecoach/features/auth/data/session_coordinator.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -34,9 +35,14 @@ void main() {
         }
         return http.Response('not found', 404);
       });
+      final coordinator = SessionCoordinator(
+        http: ApiClient(baseUrl: 'http://test', client: backend),
+        tokens: tokens,
+      );
       final repo = AuthRepository(
         ApiClient(baseUrl: 'http://test', client: backend),
         tokens,
+        coordinator,
       );
 
       final refreshing = repo.refreshSession();
@@ -73,9 +79,14 @@ void main() {
       }
       return http.Response('not found', 404);
     });
+    final coordinator = SessionCoordinator(
+      http: ApiClient(baseUrl: 'http://test', client: backend),
+      tokens: tokens,
+    );
     final repo = AuthRepository(
       ApiClient(baseUrl: 'http://test', client: backend),
       tokens,
+      coordinator,
     );
 
     await repo.refreshSession();
@@ -123,6 +134,10 @@ void main() {
       }
       return http.Response('not found', 404);
     });
+    final coordinator = SessionCoordinator(
+      http: ApiClient(baseUrl: 'http://test', client: backend),
+      tokens: tokens,
+    );
     final repo = AuthRepository(
       ApiClient(
         baseUrl: 'http://test',
@@ -130,6 +145,7 @@ void main() {
         accessToken: tokens.readAccess,
       ),
       tokens,
+      coordinator,
     );
 
     final refreshing = repo.refreshSession();
@@ -158,9 +174,14 @@ void main() {
         if (req.url.path.endsWith('/auth/refresh')) refreshCalls++;
         return http.Response('not found', 404);
       });
+      final coordinator = SessionCoordinator(
+        http: ApiClient(baseUrl: 'http://test', client: backend),
+        tokens: tokens,
+      );
       final repo = AuthRepository(
         ApiClient(baseUrl: 'http://test', client: backend),
         tokens,
+        coordinator,
       );
 
       await repo.logout();
@@ -180,9 +201,14 @@ void main() {
       final tokens = MemoryTokenStorage();
       await tokens.save('access-one', 'refresh-one');
       final backend = MockClient((req) async => throw const SocketishFailure());
+      final coordinator = SessionCoordinator(
+        http: ApiClient(baseUrl: 'http://test', client: backend),
+        tokens: tokens,
+      );
       final repo = AuthRepository(
         ApiClient(baseUrl: 'http://test', client: backend),
         tokens,
+        coordinator,
       );
 
       await repo.logout();
@@ -201,9 +227,14 @@ void main() {
       }
       return http.Response('not found', 404);
     });
+    final coordinator = SessionCoordinator(
+      http: ApiClient(baseUrl: 'http://test', client: backend),
+      tokens: tokens,
+    );
     final repo = AuthRepository(
       ApiClient(baseUrl: 'http://test', client: backend),
       tokens,
+      coordinator,
     );
 
     await Future.wait([repo.logout(), repo.logout(), repo.logout()]);

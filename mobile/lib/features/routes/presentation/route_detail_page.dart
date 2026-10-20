@@ -214,6 +214,11 @@ class _RouteBodyState extends ConsumerState<_RouteBody> {
           runSpacing: 8,
           children: [
             FilledButton.icon(
+              onPressed: () => context.go('/ride/start?route=${_route.id}'),
+              icon: const Icon(Icons.directions_bike_rounded),
+              label: Text(t.get('planner.rideThisRoute')),
+            ),
+            FilledButton.icon(
               onPressed: () => context.go('/routes/${_route.id}/edit'),
               icon: const Icon(Icons.edit_outlined),
               label: Text(t.get('routes.edit')),

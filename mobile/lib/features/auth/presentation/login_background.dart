@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Login backdrop: the alpine photo when it is bundled, the painted scene
-/// otherwise.
+/// Shared authentication backdrop: the cyclist-free alpine road photo when
+/// it is bundled, the painted scene otherwise.
 ///
-/// The photo lives at `assets/images/login-hero.jpg` (declared in
-/// `pubspec.yaml`). If it is ever missing from a build, `errorBuilder` falls
-/// back to the painted scene instead of rendering a broken image — so the
-/// screen is never blank, in production or in widget tests.
-class LoginBackground extends StatelessWidget {
-  const LoginBackground({super.key});
+/// The photo lives at [AuthBackground.road] (declared in `pubspec.yaml`). If
+/// it is ever missing from a build, `errorBuilder` falls back to the painted
+/// scene instead of rendering a broken image — so the screen is never blank,
+/// in production or in widget tests.
+class AuthBackground extends StatelessWidget {
+  const AuthBackground({super.key});
 
-  static const photo = 'assets/images/login-hero.jpg';
+  static const road = 'assets/images/auth-road.jpg';
 
   @override
   Widget build(BuildContext context) {
     return Positioned.fill(
       child: Image.asset(
-        photo,
+        road,
         fit: BoxFit.cover,
         // The photo is bright; a light scrim keeps the glass card readable.
         color: Colors.black.withValues(alpha: 0.12),
@@ -94,30 +94,30 @@ class _AlpinePainter extends CustomPainter {
       ..close();
     canvas.drawPath(cliffShade, Paint()..color = const Color(0xFF5E5347));
 
-    // Rolling green slopes left and right.
+    // Rolling blue-slate slopes left and right, echoing the auth palette.
     final leftSlope = Path()
       ..moveTo(0, h * 0.52)
       ..quadraticBezierTo(w * 0.25, h * 0.50, w * 0.45, h * 0.62)
       ..lineTo(w * 0.35, h)
       ..lineTo(0, h)
       ..close();
-    canvas.drawPath(leftSlope, Paint()..color = const Color(0xFF3E7A3E));
+    canvas.drawPath(leftSlope, Paint()..color = const Color(0xFF2E4A6B));
     final rightSlope = Path()
       ..moveTo(w, h * 0.55)
       ..quadraticBezierTo(w * 0.78, h * 0.56, w * 0.62, h * 0.66)
       ..lineTo(w * 0.72, h)
       ..lineTo(w, h)
       ..close();
-    canvas.drawPath(rightSlope, Paint()..color = const Color(0xFF4C8A44));
+    canvas.drawPath(rightSlope, Paint()..color = const Color(0xFF3A5A80));
 
-    // Meadow between the slopes.
+    // Valley between the slopes.
     final meadow = Path()
       ..moveTo(w * 0.30, h * 0.60)
       ..quadraticBezierTo(w * 0.55, h * 0.58, w * 0.75, h * 0.64)
       ..lineTo(w * 0.72, h)
       ..lineTo(w * 0.35, h)
       ..close();
-    canvas.drawPath(meadow, Paint()..color = const Color(0xFF69A854));
+    canvas.drawPath(meadow, Paint()..color = const Color(0xFF54749C));
 
     // The road: a winding pass climbing from the bottom to the right ridge.
     final road = Path()

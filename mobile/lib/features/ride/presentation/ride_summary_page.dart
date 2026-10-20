@@ -107,6 +107,8 @@ class RideRecoveryPage extends ConsumerWidget {
                       bikeId: ride.bikeId,
                       bikeName: ride.bikeId,
                       resumeLocalId: ride.id,
+                      foregroundTitle: t.get('ride.fgTitle'),
+                      foregroundText: t.get('ride.fgText'),
                     );
                     if (context.mounted) context.go('/ride/recording');
                   },
@@ -120,6 +122,8 @@ class RideRecoveryPage extends ConsumerWidget {
                       bikeId: ride.bikeId,
                       bikeName: ride.bikeId,
                       resumeLocalId: ride.id,
+                      foregroundTitle: t.get('ride.fgTitle'),
+                      foregroundText: t.get('ride.fgText'),
                     );
                     await session.finish();
                     if (context.mounted) context.go('/ride/summary');
@@ -134,6 +138,8 @@ class RideRecoveryPage extends ConsumerWidget {
                       bikeId: ride.bikeId,
                       bikeName: ride.bikeId,
                       resumeLocalId: ride.id,
+                      foregroundTitle: t.get('ride.fgTitle'),
+                      foregroundText: t.get('ride.fgText'),
                     );
                     await session.discardRide();
                     if (context.mounted) context.go('/home');

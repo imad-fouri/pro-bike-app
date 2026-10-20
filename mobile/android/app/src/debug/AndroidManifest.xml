@@ -4,4 +4,9 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- DEBUG ONLY: permit cleartext HTTP to the LAN development API. This
+         <application> element merges its attribute into the main manifest's
+         <application> for debug builds only; release builds never see this
+         file and keep the platform default, which blocks cleartext. -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>

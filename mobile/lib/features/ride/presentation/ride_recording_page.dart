@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../routes/presentation/routes_providers.dart';
 import '../data/ride_recorder.dart';
 import '../domain/units.dart';
+import 'ride_live_map.dart';
 import 'ride_providers.dart';
 
 /// Recording screen from the mockup: map panel with Recording pill,
@@ -28,6 +31,16 @@ class RideRecordingPage extends ConsumerWidget {
     const imperial = false; // TODO Phase 5: profile measurement system
     final m = live.metrics;
     final recording = live.phase == RecordingPhase.recording;
+    // Planned-route overlay: display-only geometry for the pinned route, if
+    // any. Unavailable or failed geometry leaves the live track untouched.
+    final planned = live.routeId == null
+        ? const <LatLng>[]
+        : ref
+              .watch(routeGeometryProvider(live.routeId!))
+              .maybeWhen(
+                data: (g) => [for (final p in g.points) LatLng(p.lat, p.lon)],
+                orElse: () => const <LatLng>[],
+              );
     return Scaffold(
       appBar: AppBar(
         title: Text(t.get('ride.liveRide')),
@@ -54,7 +67,27 @@ class RideRecordingPage extends ConsumerWidget {
       ),
       body: Column(
         children: [
-          Expanded(child: _MapPanel(recording: recording)),
+          Expanded(
+            child: RideLiveMap(
+              live: live,
+              recording: recording,
+              planned: planned,
+            ),
+          ),
+          if (live.backgroundLimited)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.md,
+                0,
+              ),
+              child: Text(
+                t.get('ride.bgLimited'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: AppColors.zone3),
+              ),
+            ),
           const SizedBox(height: AppSpacing.md),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
@@ -186,182 +219,6 @@ class RideRecordingPage extends ConsumerWidget {
       if (context.mounted) context.go('/ride/summary');
     }
   }
-}
-
-/// Map stand-in (map SDK lands in a later phase): topographic-style panel
-/// with a traced route, Recording pill and controls.
-class _MapPanel extends StatelessWidget {
-  final bool recording;
-  const _MapPanel({required this.recording});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.l10n;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, 0, AppSpacing.md, 0),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        child: Stack(
-          children: [
-            Positioned.fill(child: CustomPaint(painter: _RouteMapPainter())),
-            Positioned(
-              left: 12,
-              top: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.background.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.circle,
-                      size: 10,
-                      color: recording ? AppColors.zone5 : AppColors.textMuted,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      recording
-                          ? t.get('ride.recording')
-                          : t.get('ride.paused'),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            Positioned(
-              right: 12,
-              top: 12,
-              child: _MapFab(icon: Icons.fullscreen_rounded, onPressed: () {}),
-            ),
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: _MapFab(icon: Icons.my_location_rounded, onPressed: () {}),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MapFab extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onPressed;
-  const _MapFab({required this.icon, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.background.withValues(alpha: 0.85),
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 20, color: AppColors.textOnDark),
-        ),
-      ),
-    );
-  }
-}
-
-class _RouteMapPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bg = Paint()
-      ..shader = const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFF153A31), Color(0xFF0D2622)],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, bg);
-
-    // Contour bands for a topo feel.
-    final contour = Paint()
-      ..color = AppColors.primary.withValues(alpha: 0.06)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    for (var i = 1; i <= 6; i++) {
-      final path = Path();
-      final y = size.height * i / 7;
-      path.moveTo(0, y);
-      path.cubicTo(
-        size.width * 0.3,
-        y - 24,
-        size.width * 0.6,
-        y + 24,
-        size.width,
-        y - 12,
-      );
-      canvas.drawPath(path, contour);
-    }
-
-    // Traced route.
-    final route = Path()
-      ..moveTo(size.width * 0.15, size.height * 0.85)
-      ..cubicTo(
-        size.width * 0.30,
-        size.height * 0.62,
-        size.width * 0.22,
-        size.height * 0.48,
-        size.width * 0.45,
-        size.height * 0.42,
-      )
-      ..cubicTo(
-        size.width * 0.68,
-        size.height * 0.36,
-        size.width * 0.58,
-        size.height * 0.20,
-        size.width * 0.84,
-        size.height * 0.15,
-      );
-    canvas.drawPath(
-      route,
-      Paint()
-        ..color = const Color(0xFF2F80ED)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 5
-        ..strokeCap = StrokeCap.round,
-    );
-    canvas.drawPath(
-      route,
-      Paint()
-        ..color = Colors.white.withValues(alpha: 0.35)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Start / current markers.
-    canvas.drawCircle(
-      Offset(size.width * 0.15, size.height * 0.85),
-      8,
-      Paint()..color = AppColors.primary,
-    );
-    canvas.drawCircle(
-      Offset(size.width * 0.15, size.height * 0.85),
-      4,
-      Paint()..color = AppColors.background,
-    );
-    final head = Offset(size.width * 0.84, size.height * 0.15);
-    canvas.drawCircle(head, 10, Paint()..color = AppColors.zone5);
-    canvas.drawCircle(head, 5, Paint()..color = Colors.white);
-  }
-
-  @override
-  bool shouldRepaint(_RouteMapPainter oldDelegate) => false;
 }
 
 class _MetricTile extends StatelessWidget {

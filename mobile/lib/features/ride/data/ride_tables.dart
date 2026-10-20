@@ -45,6 +45,7 @@ class CachedRoutes extends Table {
   IntColumn get versionNo => integer().withDefault(const Constant(0))();
   DateTimeColumn get savedAt => dateTime()();
 
+
   @override
   Set<Column> get primaryKey => {id};
 }

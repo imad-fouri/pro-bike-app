@@ -13,6 +13,7 @@ import 'package:cyclecoach/features/ride/presentation/ride_providers.dart';
 import 'package:cyclecoach/features/ride/presentation/ride_recording_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -229,11 +230,139 @@ void main() {
     await db.close();
   });
 
+  group('live track + speed + background flag', () {
+    Future<(RideRecorder, List<LiveRide>, StreamController<GpsObservation>)>
+    startRecorder({bool bg = true}) async {
+      final db = RideDatabase.forTesting(NativeDatabase.memory());
+      final positions = StreamController<GpsObservation>.broadcast();
+      final backend = MockClient((req) async {
+        if (req.url.path.endsWith('/api/v1/rides')) {
+          return http.Response('{"id":"srv-1","status":"recording"}', 201);
+        }
+        return http.Response('not found', 404);
+      });
+      final rec = RideRecorder(
+        db: db,
+        rides: RidesApi(
+          ApiClient(
+            baseUrl: 'http://test',
+            client: backend,
+            accessToken: () async => 'tok',
+          ),
+        ),
+        location: _FakeLocation(positions.stream, bg: bg),
+      );
+      final lives = <LiveRide>[];
+      rec.updates.listen(lives.add);
+      await rec.start(bikeId: 'b1', bikeName: 'Road');
+      return (rec, lives, positions);
+    }
+
+    test('snapshots carry metered fixes only', () async {
+      final (rec, lives, positions) = await startRecorder();
+      positions.add(
+        GpsObservation(
+          seq: 0,
+          lat: 33,
+          lon: -6,
+          time: t0,
+          accuracy: 5,
+          speed: 2.0,
+        ),
+      );
+      positions.add(
+        GpsObservation(
+          seq: 1,
+          lat: 33 + step,
+          lon: -6,
+          time: t0.add(const Duration(seconds: 5)),
+          accuracy: 5,
+          speed: 2.0,
+        ),
+      );
+      positions.add(
+        GpsObservation(
+          seq: 2,
+          lat: 33 + step + 0.00001,
+          lon: -6,
+          time: t0.add(const Duration(seconds: 10)),
+          accuracy: 5,
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 100));
+      await rec.pause(); // force-emit the current snapshot
+      await Future.delayed(const Duration(milliseconds: 100));
+      final track = lives.last.track;
+      expect(track.length, 2); // anchor + accrued; the jitter hold excluded
+      expect(track.first.lat, 33.0);
+      expect(track.last.lat, closeTo(33 + step, 1e-9));
+      expect(lives.last.backgroundLimited, isFalse);
+      await rec.dispose();
+    });
+
+    test('platform speed is preferred for the live readout', () async {
+      final (rec, lives, positions) = await startRecorder();
+      positions.add(
+        GpsObservation(
+          seq: 0,
+          lat: 33,
+          lon: -6,
+          time: t0,
+          accuracy: 5,
+          speed: 4.0,
+        ),
+      );
+      positions.add(
+        GpsObservation(
+          seq: 1,
+          lat: 33 + step,
+          lon: -6,
+          time: t0.add(const Duration(seconds: 5)),
+          accuracy: 5,
+          speed: 4.5,
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 100));
+      await rec.pause();
+      await Future.delayed(const Duration(milliseconds: 100));
+      // Segment implied ~2 m/s; the Doppler value wins.
+      expect(lives.last.currentSpeedMS, 4.5);
+      await rec.dispose();
+    });
+
+    test('missing background grant is surfaced, not hidden', () async {
+      final (rec, lives, positions) = await startRecorder(bg: false);
+      await Future.delayed(const Duration(milliseconds: 100));
+      expect(lives.last.backgroundLimited, isTrue);
+      await rec.dispose();
+      await positions.close();
+    });
+  });
+
   test('ride l10n ar', () async {
     expect(
       AppLocalizations(const Locale('ar')).get('ride.pause'),
       'إيقاف مؤقت',
     );
+  });
+
+  test('ride map/background keys resolve in en/fr/ar', () {
+    const keys = [
+      'ride.fgTitle',
+      'ride.fgText',
+      'ride.bgLimited',
+      'ride.recenter',
+      'ride.fitTrack',
+      'ride.waitingFix',
+      'ride.tilesOffline',
+    ];
+    for (final lang in ['en', 'fr', 'ar']) {
+      final loc = AppLocalizations(Locale(lang));
+      for (final key in keys) {
+        expect(loc.get(key), isNotEmpty, reason: '$key missing in $lang');
+        expect(loc.get(key), isNot(key), reason: '$key untranslated');
+      }
+    }
   });
 }
 
@@ -562,6 +691,32 @@ Widget _rideShell(Locale locale, LiveRide live) {
 }
 
 void _rideWidgetTests() {
+  LiveRide liveWith({
+    List<({double lat, double lon})> track = const [],
+    bool backgroundLimited = false,
+  }) {
+    return LiveRide(
+      localId: 'l',
+      bikeId: 'b',
+      bikeName: 'Road',
+      phase: RecordingPhase.recording,
+      metrics: const RideMetrics(
+        distanceM: 1500,
+        gainM: 42,
+        lossM: 0,
+        movingS: 600,
+        elapsedS: 700,
+        avgSpeedMS: 2.5,
+        maxSpeedMS: 9,
+      ),
+      currentSpeedMS: 3.0,
+      gpsQuality: 'good',
+      syncState: 'idle',
+      track: track,
+      backgroundLimited: backgroundLimited,
+    );
+  }
+
   testWidgets('recording page renders RTL metrics + pause', (t) async {
     final semantics = t.ensureSemantics();
     final live = LiveRide(
@@ -591,20 +746,68 @@ void _rideWidgetTests() {
     expect(Directionality.of(ctx), TextDirection.rtl);
     semantics.dispose();
   });
+
+  testWidgets('live map draws the metered track with actions', (t) async {
+    await t.pumpWidget(
+      _rideShell(
+        const Locale('en'),
+        liveWith(
+          track: const [(lat: 33.0, lon: -6.0), (lat: 33.00009, lon: -6.0)],
+        ),
+      ),
+    );
+    await t.pumpAndSettle();
+
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(find.byType(PolylineLayer), findsOneWidget);
+    expect(find.byType(MarkerLayer), findsOneWidget);
+    expect(find.byTooltip('Recenter on rider'), findsOneWidget);
+    expect(find.byTooltip('Fit whole track'), findsOneWidget);
+    expect(find.text('Waiting for GPS fix…'), findsNothing);
+    expect(find.textContaining('background location'), findsNothing);
+  });
+
+  testWidgets('empty track shows the waiting state, not a crash', (t) async {
+    await t.pumpWidget(_rideShell(const Locale('en'), liveWith()));
+    await t.pumpAndSettle();
+
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(find.text('Waiting for GPS fix…'), findsOneWidget);
+    expect(find.byType(PolylineLayer), findsNothing);
+  });
+
+  testWidgets('background-limited notice is surfaced', (t) async {
+    await t.pumpWidget(
+      _rideShell(const Locale('en'), liveWith(backgroundLimited: true)),
+    );
+    await t.pumpAndSettle();
+
+    expect(find.textContaining('background location'), findsOneWidget);
+  });
 }
 
 class _FakeLocation implements LocationSource {
   final Stream<GpsObservation> stream;
   final LocationPermissionState perm;
-  _FakeLocation(this.stream, {this.perm = LocationPermissionState.granted});
+  final bool bg;
+  _FakeLocation(
+    this.stream, {
+    this.perm = LocationPermissionState.granted,
+    this.bg = true,
+  });
 
   @override
   Future<LocationPermissionState> ensurePrecisePermission() async => perm;
 
   @override
+  Future<bool> hasBackgroundPermission() async => bg;
+
+  @override
   Stream<GpsObservation> positions({
     required TrackingPolicy policy,
     required int Function() nextSeq,
+    String? foregroundTitle,
+    String? foregroundText,
   }) => stream;
 
   @override

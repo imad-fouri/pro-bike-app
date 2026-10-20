@@ -3,18 +3,49 @@ import 'dart:math' as math;
 /// Client-side GPS processing engine. Mirrors backend `gps_engine.py`
 /// thresholds exactly; the server revalidates on ingest (authoritative).
 /// Provenance: observations raw, metrics derived — never mixed.
+///
+/// Metering uses a confidence anchor: distance, moving time, and elevation
+/// accrue only between fixes displaced enough to be distinguishable from
+/// GPS noise. Stationary jitter advances sequence/time bookkeeping but
+/// never the meters, so standing still cannot inflate a ride. Slow but
+/// genuine movement is preserved — it accrues in gate-sized chunks once
+/// displacement exceeds the confidence radius, only later, never lost.
 class GpsPolicy {
   final double accuracyRejectM;
   final double jumpSpeedRejectMS;
   final double elevationThresholdM;
   final double movingThresholdMS;
 
+  /// Required displacement for a confident move:
+  /// `max(minConfidentDisplacementM, effectiveAccuracy * confidenceFactor)`,
+  /// where effectiveAccuracy is the fix's reported accuracy or
+  /// [defaultAccuracyM] when the platform reports none.
+  ///
+  /// Rationale: fixes scatter within roughly one sigma of truth, so a move
+  /// shorter than the reported accuracy is indistinguishable from noise.
+  /// The floor keeps the gate sane when the platform claims implausibly
+  /// good accuracy; the default covers fixes with no accuracy at all.
+  final double confidenceFactor;
+  final double minConfidentDisplacementM;
+  final double defaultAccuracyM;
+
   const GpsPolicy({
     this.accuracyRejectM = 25.0,
     this.jumpSpeedRejectMS = 80.0,
     this.elevationThresholdM = 3.0,
     this.movingThresholdMS = 1.0,
+    this.confidenceFactor = 1.0,
+    this.minConfidentDisplacementM = 3.0,
+    this.defaultAccuracyM = 8.0,
   });
+
+  double requiredDisplacementM(double? accuracy) {
+    final effective = accuracy ?? defaultAccuracyM;
+    final scaled = effective * confidenceFactor;
+    return scaled > minConfidentDisplacementM
+        ? scaled
+        : minConfidentDisplacementM;
+  }
 }
 
 class GpsObservation {
@@ -67,11 +98,21 @@ double haversineM(double lat1, double lon1, double lat2, double lon2) {
   return 2 * r * math.asin(math.sqrt(a));
 }
 
-/// Mutable fold state. [resetSegment] on resume kills the pause gap.
+/// Mutable fold state. [resetSegment] on resume kills the pause gap: the
+/// anchor and per-fix continuity are cleared (metrics, sequence, and the
+/// elevation baseline persist — altitude is absolute, not relative).
 class GpsEngine {
   final GpsPolicy policy;
-  double? _lat, _lon, _eleBase;
-  DateTime? _time, _first;
+
+  /// Last seen fix: per-fix continuity (ordering, jump, max speed).
+  double? _lat, _lon;
+  DateTime? _time;
+
+  /// Confidence anchor: last fix that moved the meters.
+  double? _anchorLat, _anchorLon, _anchorAlt;
+  DateTime? _anchorTime;
+
+  DateTime? _first;
   int? _seq;
   double distanceM = 0;
   double gainM = 0;
@@ -85,6 +126,8 @@ class GpsEngine {
   void resetSegment() {
     _lat = _lon = null;
     _time = null;
+    _anchorLat = _anchorLon = null;
+    _anchorTime = null;
   }
 
   GpsVerdict process(GpsObservation o) {
@@ -109,41 +152,77 @@ class GpsEngine {
       _time = o.time;
       _seq = o.seq;
       _first ??= o.time;
-      _eleBase ??= o.alt;
+      _anchorLat ??= o.lat;
+      _anchorLon ??= o.lon;
+      _anchorTime ??= o.time;
+      _anchorAlt ??= o.alt;
       acceptedCount++;
       return const GpsVerdict(true, 'ok');
     }
-    final dist = haversineM(_lat!, _lon!, o.lat, o.lon);
-    final dt = o.time.difference(_time!).inMilliseconds / 1000.0;
-    if (dt <= 0) return const GpsVerdict(false, 'time_regression');
-    if (dist < 1.0 && dt < 1.0) {
+    final fixDist = haversineM(_lat!, _lon!, o.lat, o.lon);
+    final fixDt = o.time.difference(_time!).inMilliseconds / 1000.0;
+    if (fixDt <= 0) return const GpsVerdict(false, 'time_regression');
+    if (fixDist < 1.0 && fixDt < 1.0) {
       _seq = o.seq;
       return const GpsVerdict(false, 'duplicate');
     }
-    if (dist / dt > policy.jumpSpeedRejectMS) {
+    if (fixDist / fixDt > policy.jumpSpeedRejectMS) {
+      // Impossible jump: do NOT advance anything, so one glitch cannot
+      // poison the next good fix.
       return const GpsVerdict(false, 'jump');
     }
-    final moving = dist / dt >= policy.movingThresholdMS;
-    distanceM += dist;
-    if (moving) movingS += dt;
-    if (dist / dt > maxSpeedMS) maxSpeedMS = dist / dt;
+    final fixSpeed = fixDist / fixDt;
+    if (fixSpeed > maxSpeedMS) maxSpeedMS = fixSpeed;
+
+    if (_anchorLat == null || _anchorTime == null) {
+      // Continuity without an anchor (defensive: construction and resume
+      // always set both): adopt the last fix so metering continues.
+      _anchorLat = _lat;
+      _anchorLon = _lon;
+      _anchorTime = _time;
+    }
+    final segDist = haversineM(_anchorLat!, _anchorLon!, o.lat, o.lon);
+    if (segDist < policy.requiredDisplacementM(o.accuracy)) {
+      // Stationary jitter (or sub-confidence shuffle): advance continuity
+      // bookkeeping so later fixes judge against fresh state, but move no
+      // meters and touch no elevation baseline.
+      _lat = o.lat;
+      _lon = o.lon;
+      _time = o.time;
+      _seq = o.seq;
+      return const GpsVerdict(false, 'stationary');
+    }
+
+    final segDt = o.time.difference(_anchorTime!).inMilliseconds / 1000.0;
+    final moving = segDist / segDt >= policy.movingThresholdMS;
+    distanceM += segDist;
+    if (moving) movingS += segDt;
     if (o.alt != null) {
-      _eleBase ??= o.alt;
-      final delta = o.alt! - _eleBase!;
+      _anchorAlt ??= o.alt;
+      final delta = o.alt! - _anchorAlt!;
       if (delta >= policy.elevationThresholdM) {
         gainM += delta;
-        _eleBase = o.alt;
+        _anchorAlt = o.alt;
       } else if (delta <= -policy.elevationThresholdM) {
         lossM += -delta;
-        _eleBase = o.alt;
+        _anchorAlt = o.alt;
       }
     }
     _lat = o.lat;
     _lon = o.lon;
     _time = o.time;
+    _anchorLat = o.lat;
+    _anchorLon = o.lon;
+    _anchorTime = o.time;
     _seq = o.seq;
     acceptedCount++;
-    return GpsVerdict(true, 'ok', distanceM: dist, dtS: dt, moving: moving);
+    return GpsVerdict(
+      true,
+      'ok',
+      distanceM: segDist,
+      dtS: segDt,
+      moving: moving,
+    );
   }
 
   RideMetrics metrics() {

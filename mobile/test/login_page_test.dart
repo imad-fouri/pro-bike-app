@@ -2,6 +2,7 @@ import 'package:cyclecoach/core/l10n/app_localizations.dart';
 import 'package:cyclecoach/core/network/api_client.dart';
 import 'package:cyclecoach/core/storage/token_storage.dart';
 import 'package:cyclecoach/features/auth/presentation/auth_state.dart';
+import 'package:cyclecoach/features/auth/presentation/login_background.dart';
 import 'package:cyclecoach/features/auth/presentation/login_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -68,6 +69,7 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.byType(AppBar), findsNothing);
+    expect(find.byType(AuthBackground), findsOneWidget);
     expect(find.byKey(const Key('login.email')), findsOneWidget);
     expect(find.byKey(const Key('login.password')), findsOneWidget);
     expect(find.byKey(const Key('login.submit')), findsOneWidget);
@@ -117,10 +119,9 @@ void main() {
     await t.pumpAndSettle();
 
     expect(find.byKey(const Key('login.error')), findsOneWidget);
-    expect(
-      find.text('Something went wrong. (INVALID_CREDENTIALS)'),
-      findsOneWidget,
-    );
+    // Friendly localized message: the raw backend code never reaches users.
+    expect(find.text('Wrong email or password. Try again.'), findsOneWidget);
+    expect(find.textContaining('INVALID_CREDENTIALS'), findsNothing);
   });
 
   testWidgets('arabic renders RTL with translated card', (t) async {

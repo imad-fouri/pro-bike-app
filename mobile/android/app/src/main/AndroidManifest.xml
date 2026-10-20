@@ -6,6 +6,13 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- INTERNET is required in every build variant: without it a release APK
+         cannot reach the API at all. This permission does NOT allow cleartext
+         HTTP — on API 28+ cleartext stays blocked by the platform default
+         unless a network security config permits it, and only the debug
+         source set ships such a config. Release builds therefore stay
+         HTTPS-only. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="cyclecoach"
         android:name="${applicationName}"

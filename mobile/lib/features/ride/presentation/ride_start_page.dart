@@ -11,8 +11,11 @@ import 'ride_providers.dart';
 
 /// Ride start: bike selection + optional planned route + permission request
 /// (never at app startup). The route reference is nullable by design (§49).
+/// A `?route=` query parameter preselects a planned route (validated against
+/// the readable list — an unknown id is ignored, never trusted).
 class RideStartPage extends ConsumerStatefulWidget {
-  const RideStartPage({super.key});
+  final String? initialRouteId;
+  const RideStartPage({super.key, this.initialRouteId});
   @override
   ConsumerState<RideStartPage> createState() => _RideStartPageState();
 }
@@ -75,6 +78,14 @@ class _RideStartPageState extends ConsumerState<RideStartPage> {
       data: (list) {
         final available = list.where((r) => !r.isArchived).toList();
         if (available.isEmpty) return const SizedBox.shrink();
+        // A preselected id from `?route=` applies only when it names a
+        // readable, unarchived route; anything else falls back to none.
+        final initial = widget.initialRouteId;
+        if (_routeId == null &&
+            initial != null &&
+            available.any((r) => r.id == initial)) {
+          _routeId = initial;
+        }
         return DropdownButtonFormField<String?>(
           initialValue: _routeId,
           decoration: InputDecoration(labelText: t.get('routes.followRoute')),
@@ -107,7 +118,13 @@ class _RideStartPageState extends ConsumerState<RideStartPage> {
     );
     final perm = await ref
         .read(rideSessionProvider.notifier)
-        .startRide(bikeId: bike.id, bikeName: bike.name, routeId: _routeId);
+        .startRide(
+          bikeId: bike.id,
+          bikeName: bike.name,
+          routeId: _routeId,
+          foregroundTitle: context.l10n.get('ride.fgTitle'),
+          foregroundText: context.l10n.get('ride.fgText'),
+        );
     if (!mounted) return;
     setState(() => _busy = false);
     switch (perm) {

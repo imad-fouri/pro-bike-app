@@ -9,10 +9,17 @@ import '../ads/domain/ad_policy.dart';
 import '../auth/presentation/auth_state.dart';
 import '../notifications/presentation/notification_providers.dart';
 import '../notifications/presentation/notification_widgets.dart';
+import '../ride/domain/ride_history.dart';
+import '../ride/domain/units.dart';
+import '../ride/presentation/history_providers.dart';
 import '../ride/presentation/ride_providers.dart';
 
-/// Dashboard from the approved mockup: brand header, Today's Workout,
-/// Quick Stats with sparklines, Next Event, 5-tab bottom nav.
+/// Dashboard: brand header, real overview aggregates, recent rides,
+/// unfinished-ride recovery, record action, 5-tab bottom nav.
+///
+/// Every number below comes from persisted server data (overview aggregates
+/// + history page one). No demo statistics: an empty account sees guidance
+/// instead of invented cards.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -68,41 +75,12 @@ class HomePage extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.lg),
           ],
-          _TodaysWorkoutCard(onViewPlan: () => context.go('/training')),
-          const SizedBox(height: AppSpacing.lg),
           _UnfinishedRideBanner(),
           _SectionTitle(t.get('home.quickStats')),
           const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              Expanded(
-                child: _QuickStatCard(
-                  label: t.get('home.weeklyDistance'),
-                  value: '180',
-                  unit: 'km',
-                  delta: '+12%',
-                  trend: const [6, 8, 7, 10, 9, 13, 15],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _QuickStatCard(
-                  label: t.get('home.elevationGain'),
-                  value: '2,400',
-                  unit: 'm',
-                  delta: '+18%',
-                  trend: const [4, 6, 5, 9, 8, 12, 16],
-                ),
-              ),
-            ],
-          ),
+          const _OverviewStats(),
           const SizedBox(height: AppSpacing.lg),
-          _SectionTitle(t.get('home.nextEvent')),
-          const SizedBox(height: AppSpacing.sm),
-          _NextEventCard(
-            meta: t.get('home.eventMeta'),
-            onTap: () => context.go('/group-rides'),
-          ),
+          _RecentRides(onViewAll: () => context.go('/rides')),
           const SizedBox(height: AppSpacing.lg),
           FilledButton.icon(
             onPressed: () => context.go('/ride/start'),
@@ -201,124 +179,112 @@ class _SectionTitle extends StatelessWidget {
   );
 }
 
-class _TodaysWorkoutCard extends StatelessWidget {
-  final VoidCallback onViewPlan;
-  const _TodaysWorkoutCard({required this.onViewPlan});
+/// Server-driven overview stats with retry. An empty account gets guidance;
+/// zeros render only when rides exist (true measured zeros), never as demo
+/// filler — the empty branch owns the no-rides case.
+class _OverviewStats extends ConsumerWidget {
+  const _OverviewStats();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final t = context.l10n;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E4D3B), Color(0xFF12352C)],
+    final overview = ref.watch(ridesOverviewProvider);
+    return overview.when(
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: CircularProgressIndicator(),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            t.get('home.todaysWorkout'),
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            t.get('home.workoutType'),
-            style: const TextStyle(
-              color: AppColors.accentLime,
-              fontWeight: FontWeight.w600,
+      error: (_, _) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(t.get('history.loadError')),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () => ref.invalidate(ridesOverviewProvider),
+              child: Text(t.get('history.retry')),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
+          ],
+        ),
+      ),
+      data: (o) {
+        if (o.isEmpty) {
+          return Column(
             children: [
-              _Pill(label: t.get('home.workoutDistance'), icon: Icons.route),
-              const SizedBox(width: 8),
-              _Pill(
-                label: t.get('home.workoutDuration'),
-                icon: Icons.timer_outlined,
+              const Icon(
+                Icons.directions_bike_rounded,
+                size: 44,
+                color: AppColors.textMuted,
               ),
-              const SizedBox(width: 8),
-              _Pill(
-                label: t.get('home.workoutZone'),
-                icon: Icons.favorite_outline,
+              const SizedBox(height: 12),
+              Text(
+                t.get('home.emptyTitle'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                t.get('home.emptyBody'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.textMuted),
               ),
             ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: onViewPlan,
-              icon: const Icon(Icons.directions_bike_rounded, size: 18),
-              label: Text(t.get('home.viewPlan')),
+          );
+        }
+        const imperial = false;
+        return GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          mainAxisExtent: 92,
+          children: [
+            _OverviewStatCard(
+              label: t.get('home.weeklyDistance'),
+              value: formatDistance(o.weekDistanceM, imperial: imperial),
             ),
-          ),
-        ],
-      ),
+            _OverviewStatCard(
+              label: t.get('home.monthDistance'),
+              value: formatDistance(o.monthDistanceM, imperial: imperial),
+            ),
+            _OverviewStatCard(
+              label: t.get('home.totalRides'),
+              value: '${o.totalRides}',
+            ),
+            _OverviewStatCard(
+              label: t.get('home.movingTime'),
+              value: formatDuration(o.totalMovingSeconds),
+            ),
+            _OverviewStatCard(
+              label: t.get('home.elevationGain'),
+              value: formatElevation(o.totalGainM, imperial: imperial),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
-class _Pill extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  const _Pill({required this.label, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: AppColors.primary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textOnDark,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickStatCard extends StatelessWidget {
+class _OverviewStatCard extends StatelessWidget {
   final String label;
   final String value;
-  final String unit;
-  final String delta;
-  final List<double> trend;
-  const _QuickStatCard({
-    required this.label,
-    required this.value,
-    required this.unit,
-    required this.delta,
-    required this.trend,
-  });
+  const _OverviewStatCard({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     return Card(
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
               label,
@@ -329,47 +295,11 @@ class _QuickStatCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 2),
-                  child: Text(
-                    unit,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  delta,
-                  style: const TextStyle(
-                    color: AppColors.primary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 36,
-              width: double.infinity,
-              child: CustomPaint(
-                painter: _SparklinePainter(
-                  values: trend,
-                  color: AppColors.primary,
-                ),
-              ),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
           ],
         ),
@@ -378,119 +308,85 @@ class _QuickStatCard extends StatelessWidget {
   }
 }
 
-class _NextEventCard extends StatelessWidget {
-  final String meta;
-  final VoidCallback onTap;
-  const _NextEventCard({required this.meta, required this.onTap});
+/// Recent completed rides (history page one, first five). Shares the feed's
+/// provider, so dashboard and history can never disagree. Silent on loading
+/// and empty (the overview section owns those states); retryable on error.
+class _RecentRides extends ConsumerWidget {
+  final VoidCallback onViewAll;
+  const _RecentRides({required this.onViewAll});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = context.l10n;
+    final history = ref.watch(rideHistoryProvider);
+    return history.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => Center(
+        child: TextButton(
+          onPressed: () => ref.invalidate(rideHistoryProvider),
+          child: Text(t.get('history.retry')),
+        ),
+      ),
+      data: (state) {
+        if (state.isEmpty) return const SizedBox.shrink();
+        final recent = state.items.take(5).toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: _SectionTitle(t.get('home.recentRides'))),
+                TextButton(
+                  onPressed: onViewAll,
+                  child: Text(t.get('home.viewAll')),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (final item in recent) _RecentRideTile(item: item),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RecentRideTile extends StatelessWidget {
+  final RideHistoryItem item;
+  const _RecentRideTile({required this.item});
 
   @override
   Widget build(BuildContext context) {
-    final t = context.l10n;
     return Card(
-      child: InkWell(
-        // Phase 9: the "next event" of a cycling app is a scheduled group ride.
-        // It pointed at `/routes`, which is not an event at all - a route is a
-        // path, and routes already have their own tab and profile entry.
-        key: const Key('home.nextEvent'),
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          child: Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.primary, AppColors.primaryDark],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.terrain_rounded,
-                  color: AppColors.background,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      t.get('home.eventTitle'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      meta,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.textMuted,
-              ),
-            ],
-          ),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: const Icon(
+          Icons.directions_bike_rounded,
+          color: AppColors.primary,
         ),
+        title: Text(
+          _formatDate(item.startedAt),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          formatDistance(item.distanceM, imperial: false),
+          style: const TextStyle(color: AppColors.textMuted),
+        ),
+        trailing: const Icon(
+          Icons.chevron_right_rounded,
+          color: AppColors.textMuted,
+        ),
+        onTap: () => context.go('/rides/${item.id}'),
       ),
     );
   }
 }
 
-class _SparklinePainter extends CustomPainter {
-  final List<double> values;
-  final Color color;
-  const _SparklinePainter({required this.values, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-    final min = values.reduce((a, b) => a < b ? a : b);
-    final max = values.reduce((a, b) => a > b ? a : b);
-    final span = (max - min) == 0 ? 1.0 : max - min;
-    final step = size.width / (values.length - 1);
-    final points = [
-      for (var i = 0; i < values.length; i++)
-        Offset(
-          i * step,
-          size.height - ((values[i] - min) / span) * size.height,
-        ),
-    ];
-    final path = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
-    }
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = color
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
-    );
-    final area = Path()..moveTo(points.first.dx, points.first.dy);
-    for (var i = 1; i < points.length; i++) {
-      area.lineTo(points[i].dx, points[i].dy);
-    }
-    area
-      ..lineTo(size.width, size.height)
-      ..lineTo(0, size.height)
-      ..close();
-    canvas.drawPath(area, Paint()..color = color.withValues(alpha: 0.12));
-  }
-
-  @override
-  bool shouldRepaint(_SparklinePainter old) =>
-      old.values != values || old.color != color;
+/// Numeric `YYYY-MM-DD HH:MM` in the device timezone (see history feed).
+String _formatDate(DateTime? at) {
+  if (at == null) return '—';
+  final l = at.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${l.year}-${two(l.month)}-${two(l.day)} '
+      '${two(l.hour)}:${two(l.minute)}';
 }

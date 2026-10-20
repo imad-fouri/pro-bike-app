@@ -37,4 +37,29 @@ class RidesApi {
   Future<Map<String, dynamic>> detail(String rideId) async {
     return api.get('$prefix/$rideId', auth: true);
   }
+
+  /// Paginated history (newest first). `status` filters server-side
+  /// ('completed' for the history feed); null lists everything owned.
+  Future<Map<String, dynamic>> listRides({
+    int page = 1,
+    int pageSize = 20,
+    String? status,
+  }) async {
+    final query =
+        'page=$page&page_size=$pageSize${status == null ? '' : '&status=$status'}';
+    return api.get('$prefix?$query', auth: true);
+  }
+
+  /// Accepted fixes for the detail map, oldest first, bounded server-side.
+  Future<Map<String, dynamic>> ridePoints(
+    String rideId, {
+    int limit = 2000,
+  }) async {
+    return api.get('$prefix/$rideId/points?limit=$limit', auth: true);
+  }
+
+  /// Dashboard aggregates over completed rides (UTC calendar windows).
+  Future<Map<String, dynamic>> ridesOverview() async {
+    return api.get('$prefix/stats/overview', auth: true);
+  }
 }

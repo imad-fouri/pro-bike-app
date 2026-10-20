@@ -48,6 +48,8 @@ class RideSession extends Notifier<LiveRide?> {
     required String bikeName,
     String? routeId,
     String? resumeLocalId,
+    String? foregroundTitle,
+    String? foregroundText,
   }) async {
     final db = await ref.read(rideDatabaseProvider.future);
     _rec = RideRecorder(
@@ -62,6 +64,8 @@ class RideSession extends Notifier<LiveRide?> {
       bikeName: bikeName,
       routeId: routeId,
       resumeLocalId: resumeLocalId,
+      foregroundTitle: foregroundTitle,
+      foregroundText: foregroundText,
     );
   }
 

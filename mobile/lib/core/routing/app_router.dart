@@ -26,6 +26,8 @@ import '../../features/ads/presentation/consent_page.dart';
 import '../../features/notifications/presentation/notification_settings_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/profile_page.dart';
+import '../../features/ride/presentation/ride_detail_page.dart';
+import '../../features/ride/presentation/ride_history_page.dart';
 import '../../features/ride/presentation/ride_recording_page.dart';
 import '../../features/ride/presentation/ride_start_page.dart';
 import '../../features/ride/presentation/ride_summary_page.dart';
@@ -40,6 +42,7 @@ import '../../features/social/presentation/user_search_page.dart';
 import '../../features/routes/presentation/route_detail_page.dart';
 import '../../features/routes/presentation/route_form_page.dart';
 import '../../features/routes/presentation/route_list_page.dart';
+import '../../features/routes/presentation/route_planner_page.dart';
 import '../../features/training/presentation/training_pages.dart';
 import '../../features/teams/presentation/my_teams_page.dart';
 import '../../features/teams/presentation/team_form_page.dart';
@@ -106,7 +109,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/bikes/:id/edit',
         builder: (c, s) => BikeFormPage(bikeId: s.pathParameters['id']!),
       ),
-      GoRoute(path: '/ride/start', builder: (c, s) => const RideStartPage()),
+      GoRoute(
+        path: '/ride/start',
+        builder: (c, s) {
+          // `?route=` preselects a planned route; the start page validates it
+          // against the readable list and ignores unknown ids.
+          return RideStartPage(initialRouteId: s.uri.queryParameters['route']);
+        },
+      ),
       GoRoute(
         path: '/ride/recording',
         builder: (c, s) => const RideRecordingPage(),
@@ -119,10 +129,25 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/ride/recovery',
         builder: (c, s) => const RideRecoveryPage(),
       ),
+      // Phase C: ride history replaces the '/rides' placeholder. '/rides'
+      // leaves the placeholder loop below; '/rides/:id' is the detail
+      // screen. Order matters: the static route registers first so it can
+      // never be read as a ride id.
+      GoRoute(path: '/rides', builder: (c, s) => const RideHistoryPage()),
+      GoRoute(
+        path: '/rides/:id',
+        builder: (c, s) => RideDetailPage(rideId: s.pathParameters['id']!),
+      ),
       // Phase 5: routes (planned geometry) — always registered before the
       // placeholder loop below, which no longer owns '/routes'.
       GoRoute(path: '/routes', builder: (c, s) => const RouteListPage()),
       GoRoute(path: '/routes/new', builder: (c, s) => const RouteFormPage()),
+      // Registered BEFORE `/routes/:id` so "plan" can never be read as a
+      // route id — same load-bearing order as the other `/new` routes.
+      GoRoute(
+        path: '/routes/plan',
+        builder: (c, s) => const RoutePlannerPage(),
+      ),
       GoRoute(
         path: '/routes/:id',
         builder: (c, s) => RouteDetailPage(routeId: s.pathParameters['id']!),
@@ -285,7 +310,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (c, s) =>
             ChallengeDetailPage(challengeId: s.pathParameters['id']!),
       ),
-      for (final p in ['/rides', '/settings'])
+      for (final p in ['/settings'])
         GoRoute(
           path: p,
           builder: (c, s) => PlaceholderPage(title: p),

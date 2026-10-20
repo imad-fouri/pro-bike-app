@@ -43,6 +43,21 @@ class LiveRide {
   final String
   syncState; // idle | syncing | failed | offline | finalizing | pending
 
+  /// Accepted fixes for the live map, oldest first, capped at
+  /// [RideRecorder.maxTrackPoints]. Metered points only — the drawn route
+  /// is exactly what the distance came from.
+  final List<({double lat, double lon})> track;
+
+  /// Planned route identity for the recording overlay, if the ride was
+  /// started against one. Identity only — geometry resolves separately,
+  /// so the two layers can never mix.
+  final String? routeId;
+
+  /// True when background ("always") location is not granted: fixes keep
+  /// flowing in the foreground service while the app is visible, but the OS
+  /// may pause delivery with the screen off. Surfaced, never hidden.
+  final bool backgroundLimited;
+
   const LiveRide({
     required this.localId,
     this.serverId,
@@ -53,6 +68,9 @@ class LiveRide {
     this.currentSpeedMS,
     required this.gpsQuality,
     required this.syncState,
+    this.track = const [],
+    this.routeId,
+    this.backgroundLimited = false,
   });
 }
 
@@ -80,10 +98,16 @@ class RideRecorder {
   double? _currentSpeed;
   String _gpsQuality = 'none';
   String _syncState = 'idle';
+  bool _backgroundLimited = false;
   final List<LocalPointsCompanion> _buffer = [];
   Timer? _flushTimer;
   Timer? _syncTimer;
   bool _syncing = false;
+
+  /// Accepted-fix trail for the live map. Bounded so a very long ride
+  /// cannot grow memory without limit; oldest points drop first.
+  static const maxTrackPoints = 1000;
+  final List<({double lat, double lon})> _track = [];
 
   RideRecorder({
     required this.db,
@@ -99,13 +123,20 @@ class RideRecorder {
     required String bikeName,
     String? resumeLocalId,
     String? routeId,
+    String? foregroundTitle,
+    String? foregroundText,
   }) async {
     final perm = await location.ensurePrecisePermission();
     if (perm != LocationPermissionState.granted) return perm;
+    // Background grant is check-only (Android 11+ requires the settings
+    // route after the foreground grant): without it the foreground service
+    // still records while visible, but screen-off delivery may pause.
+    _backgroundLimited = !await location.hasBackgroundPermission();
     _bikeId = bikeId;
     _bikeName = bikeName;
     _engine = GpsEngine();
     _seq = 0;
+    _track.clear();
     if (resumeLocalId != null) {
       _localId = resumeLocalId;
       await _rehydrate(resumeLocalId);
@@ -139,7 +170,12 @@ class RideRecorder {
     }
     _phase = RecordingPhase.recording;
     _sub = location
-        .positions(policy: policy, nextSeq: _nextSeq)
+        .positions(
+          policy: policy,
+          nextSeq: _nextSeq,
+          foregroundTitle: foregroundTitle,
+          foregroundText: foregroundText,
+        )
         .listen(_onPosition);
     _flushTimer = Timer.periodic(
       const Duration(seconds: 5),
@@ -166,7 +202,7 @@ class RideRecorder {
     for (final p in pts) {
       if (p.seq > maxSeq) maxSeq = p.seq;
       if (p.accepted) {
-        _engine.process(
+        final verdict = _engine.process(
           GpsObservation(
             seq: p.seq,
             lat: p.lat,
@@ -178,9 +214,17 @@ class RideRecorder {
             heading: p.heading,
           ),
         );
+        if (verdict.accepted) _addTrack(p.lat, p.lon);
       }
     }
     _seq = maxSeq + 1;
+  }
+
+  void _addTrack(double lat, double lon) {
+    _track.add((lat: lat, lon: lon));
+    if (_track.length > maxTrackPoints) {
+      _track.removeRange(0, _track.length - maxTrackPoints);
+    }
   }
 
   Future<void> _onPosition(GpsObservation o) async {
@@ -189,8 +233,19 @@ class RideRecorder {
     _gpsQuality = verdict.accepted
         ? 'good'
         : (verdict.reason == 'bad_accuracy' ? 'degraded' : 'good');
-    if (verdict.accepted && verdict.moving) {
-      _currentSpeed = verdict.dtS > 0 ? verdict.distanceM / verdict.dtS : 0;
+    if (verdict.accepted) {
+      _addTrack(o.lat, o.lon);
+      if (verdict.moving) {
+        // Prefer the platform's Doppler/fused speed when sane; it does not
+        // jitter like position deltas. Fall back to the segment speed.
+        final platformSane =
+            o.speed != null &&
+            o.speed! >= 0 &&
+            o.speed! <= _engine.policy.jumpSpeedRejectMS;
+        _currentSpeed = platformSane
+            ? o.speed
+            : (verdict.dtS > 0 ? verdict.distanceM / verdict.dtS : 0);
+      }
     }
     _buffer.add(
       LocalPointsCompanion.insert(
@@ -251,6 +306,9 @@ class RideRecorder {
         currentSpeedMS: _currentSpeed,
         gpsQuality: _gpsQuality,
         syncState: _syncState,
+        track: List.of(_track),
+        routeId: _routeId,
+        backgroundLimited: _backgroundLimited,
       ),
     );
   }

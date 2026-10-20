@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'gps_processor.dart';
@@ -31,9 +32,18 @@ enum LocationPermissionState {
 /// Platform location behind an interface: geolocator in prod, fake in tests.
 abstract class LocationSource {
   Future<LocationPermissionState> ensurePrecisePermission();
+
+  /// Whether background ("always") location is granted. Check-only: on
+  /// Android 11+ the background grant must follow the foreground grant via
+  /// system settings, so this never prompts — callers degrade gracefully
+  /// (foreground-only recording) instead.
+  Future<bool> hasBackgroundPermission();
+
   Stream<GpsObservation> positions({
     required TrackingPolicy policy,
     required int Function() nextSeq,
+    String? foregroundTitle,
+    String? foregroundText,
   });
   Future<void> openSettings();
 }
@@ -65,14 +75,40 @@ class GeolocatorSource implements LocationSource {
   }
 
   @override
+  Future<bool> hasBackgroundPermission() async {
+    return await Geolocator.checkPermission() == LocationPermission.always;
+  }
+
+  @override
   Stream<GpsObservation> positions({
     required TrackingPolicy policy,
     required int Function() nextSeq,
+    String? foregroundTitle,
+    String? foregroundText,
   }) {
-    final settings = LocationSettings(
-      accuracy: policy.accuracy,
-      distanceFilter: policy.distanceFilterM,
-    );
+    final LocationSettings settings;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      // The plugin supplies its own location-type foreground service (see
+      // its manifest: GeolocatorLocationService, foregroundServiceType=
+      // "location"); this config activates it with a persistent recording
+      // notification, which is what keeps fixes flowing with the screen off.
+      // No hand-written native service: the plugin owns the service, the
+      // app owns the permission declarations.
+      settings = AndroidSettings(
+        accuracy: policy.accuracy,
+        distanceFilter: policy.distanceFilterM,
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationTitle: foregroundTitle ?? 'CycleCoach',
+          notificationText:
+              foregroundText ?? 'Recording your ride — GPS active',
+        ),
+      );
+    } else {
+      settings = LocationSettings(
+        accuracy: policy.accuracy,
+        distanceFilter: policy.distanceFilterM,
+      );
+    }
     return Geolocator.getPositionStream(locationSettings: settings).map(
       (p) => GpsObservation(
         seq: nextSeq(),

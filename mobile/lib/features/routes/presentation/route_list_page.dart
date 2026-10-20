@@ -30,6 +30,11 @@ class _RouteListPageState extends ConsumerState<RouteListPage> {
         title: Text(t.get('routes.title')),
         actions: [
           IconButton(
+            tooltip: t.get('planner.title'),
+            onPressed: () => context.go('/routes/plan'),
+            icon: const Icon(Icons.route_rounded),
+          ),
+          IconButton(
             tooltip: t.get('routes.import'),
             onPressed: _importing ? null : () => _importGpx(context),
             icon: const Icon(Icons.upload_file_rounded),
