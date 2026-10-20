@@ -29,6 +29,7 @@ None of the three reaches into the others' decisions.
 
 import asyncio
 import enum
+import hashlib
 import logging
 import uuid
 
@@ -88,6 +89,23 @@ def registered_providers() -> tuple[SubscriptionProvider, ...]:
     return tuple(_PROVIDERS)
 
 
+def provider_for(name: str) -> SubscriptionProviderProtocol | None:
+    """Resolve a registered adapter by provider name; None when absent.
+
+    Refuses to resolve ``manual`` (it is an operational marker, not a billing
+    vendor) and an unrecognised name (an unknown string can never name a
+    registered adapter). Returns the adapter itself only when it was actually
+    registered, so a caller can distinguish "not ours" from "not ready".
+    """
+    try:
+        provider = SubscriptionProvider(name.strip())
+    except ValueError:
+        return None
+    if provider is SubscriptionProvider.MANUAL:
+        return None
+    return _PROVIDERS.get(provider)
+
+
 def reset_providers() -> None:
     """Empty the registry. Test hook: each test starts from no providers."""
     _PROVIDERS.clear()
@@ -105,6 +123,25 @@ def _count(outcome: str, provider: str) -> None:
         record_purchase_verification(outcome=outcome, provider=provider)
     except Exception as exc:  # noqa: BLE001 - metrics must not fail verification
         log.warning("metrics_record_failed", extra={"error_type": type(exc).__name__})
+
+
+def _event_id(verified: VerifiedPurchase) -> str:
+    """Deterministic, bounded provider event identity.
+
+    ``verify:<provider>:<sha256(subscription|transaction|occurred_at) ⊤ 40>``
+    Re-verifying the same provider state produces the same id (so the existing
+    duplicate handling fires); a changed state produces a new id ordered by
+    ``occurred_at``. The digest keeps the event id inside the 128-character
+    column no matter how long a provider's transaction id or subscription id
+    is — the readable WS-PV form overflowed once real Apple transaction ids
+    were added (see docs/store-provider-audit.md §8.3).
+    """
+    identity = (
+        f"{verified.provider_subscription_id}|{verified.provider_transaction_id or ''}|"
+        f"{verified.occurred_at.isoformat()}"
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:40]
+    return f"verify:{verified.provider.value}:{digest}"
 
 
 async def process_purchase(
@@ -164,10 +201,7 @@ async def process_purchase(
     event = ProviderSubscriptionEvent(
         provider=verified.provider,
         provider_subscription_id=verified.provider_subscription_id,
-        provider_event_id=(
-            f"verify:{verified.provider.value}:"
-            f"{verified.provider_subscription_id}:{verified.occurred_at.isoformat()}"
-        ),
+        provider_event_id=_event_id(verified),
         user_id=user_id,
         # The catalog plan, not the provider's: after the equality check the
         # two agree, and where they could disagree the server's data wins.

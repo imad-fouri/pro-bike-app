@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.logging import redact
 from app.core.metrics import metrics
 from app.models.subscription import (
+    Entitlement,
     Feature,
     Plan,
     Subscription,
@@ -115,6 +116,7 @@ def _verified(
     environment: VerificationEnvironment = VerificationEnvironment.PRODUCTION,
     occurred: datetime | None = None,
     sub_id: str | None = None,
+    transaction_id: str | None = None,
 ) -> VerifiedPurchase:
     now = datetime.now(UTC)
     moment = occurred or now
@@ -130,6 +132,7 @@ def _verified(
         provider_event_id=f"verify-{uuid.uuid4().hex}",
         product_id=product_id,
         environment=environment,
+        provider_transaction_id=transaction_id,
     )
 
 
@@ -438,6 +441,140 @@ async def test_out_of_order_verification_does_not_regress(db_session_factory, cl
             user_id=account["user_id"],
         )
     assert state.plan is Plan.PRO
+
+
+async def test_renewal_with_new_transaction_id_extends_period(db_session_factory, client):
+    # Two Apple renewals can share a millisecond-granularity event time. They
+    # must still be two distinct events whose periods both land — the second
+    # must not be treated as a duplicate of the first (WS-RP §8.3).
+    provider = FakeVerifyProvider()
+    register_provider(provider)
+    account = await _account(client, "renewal")
+    now = datetime.now(UTC)
+    sub_id = f"app-store-{uuid.uuid4().hex}"
+    first_end = now + timedelta(days=30)
+    second_end = now + timedelta(days=60)
+
+    provider.result = VerifiedPurchase(
+        provider=SubscriptionProvider.APP_STORE,
+        provider_subscription_id=sub_id,
+        user_id=account["user_id"],
+        plan=Plan.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        current_period_start=now - timedelta(days=1),
+        current_period_end=first_end,
+        occurred_at=now,
+        provider_event_id="n/a",
+        product_id=CYCLECOACH_PRO_MONTHLY,
+        environment=VerificationEnvironment.PRODUCTION,
+        provider_transaction_id=f"tx-{uuid.uuid4().hex}",
+    )
+    async with db_session_factory() as db:
+        await process_purchase(
+            db,
+            kind=VerifyKind.PURCHASE,
+            provider_name="app_store",
+            product_id=CYCLECOACH_PRO_MONTHLY,
+            purchase_token="renewal-1",
+            user_id=account["user_id"],
+        )
+
+    provider.result = VerifiedPurchase(
+        provider=SubscriptionProvider.APP_STORE,
+        provider_subscription_id=sub_id,
+        user_id=account["user_id"],
+        plan=Plan.PRO,
+        status=SubscriptionStatus.ACTIVE,
+        current_period_start=now - timedelta(days=1),
+        current_period_end=second_end,
+        occurred_at=now,
+        provider_event_id="n/a",
+        product_id=CYCLECOACH_PRO_MONTHLY,
+        environment=VerificationEnvironment.PRODUCTION,
+        provider_transaction_id=f"tx-{uuid.uuid4().hex}",
+    )
+    async with db_session_factory() as db:
+        state = await process_purchase(
+            db,
+            kind=VerifyKind.PURCHASE,
+            provider_name="app_store",
+            product_id=CYCLECOACH_PRO_MONTHLY,
+            purchase_token="renewal-2",
+            user_id=account["user_id"],
+        )
+
+    assert state.plan is Plan.PRO
+    async with db_session_factory() as db:
+        res = await db.execute(
+            select(Entitlement).where(
+                Entitlement.user_id == account["user_id"],
+                Entitlement.source_subscription_id.is_not(None),
+            )
+        )
+        rows = res.scalars().all()
+    assert len(rows) == len(list(Feature))
+    assert all(row.expires_at == second_end for row in rows)
+
+
+async def test_same_transaction_id_reverification_is_a_duplicate(db_session_factory, client):
+    # The disambiguation must not break idempotency: re-verifying the SAME
+    # provider transaction (same id, same state) is one event, one period.
+    provider = FakeVerifyProvider()
+    register_provider(provider)
+    account = await _account(client, "same-tx")
+    now = datetime.now(UTC)
+    sub_id = f"app-store-{uuid.uuid4().hex}"
+    tx_id = f"tx-{uuid.uuid4().hex}"
+    period_end = now + timedelta(days=30)
+
+    def result() -> VerifiedPurchase:
+        return VerifiedPurchase(
+            provider=SubscriptionProvider.APP_STORE,
+            provider_subscription_id=sub_id,
+            user_id=account["user_id"],
+            plan=Plan.PRO,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=now - timedelta(days=1),
+            current_period_end=period_end,
+            occurred_at=now,
+            provider_event_id="n/a",
+            product_id=CYCLECOACH_PRO_MONTHLY,
+            environment=VerificationEnvironment.PRODUCTION,
+            provider_transaction_id=tx_id,
+        )
+
+    provider.result = result()
+    async with db_session_factory() as db:
+        await process_purchase(
+            db,
+            kind=VerifyKind.PURCHASE,
+            provider_name="app_store",
+            product_id=CYCLECOACH_PRO_MONTHLY,
+            purchase_token="verify",
+            user_id=account["user_id"],
+        )
+    provider.result = result()
+    async with db_session_factory() as db:
+        state = await process_purchase(
+            db,
+            kind=VerifyKind.PURCHASE,
+            provider_name="app_store",
+            product_id=CYCLECOACH_PRO_MONTHLY,
+            purchase_token="verify-again",
+            user_id=account["user_id"],
+        )
+    assert state.plan is Plan.PRO
+    async with db_session_factory() as db:
+        res = await db.execute(
+            select(Entitlement).where(
+                Entitlement.user_id == account["user_id"],
+                Entitlement.source_subscription_id.is_not(None),
+            )
+        )
+        rows = res.scalars().all()
+    assert len(rows) == len(list(Feature))
+    assert all(row.expires_at == period_end for row in rows)
+    assert await _subscription_count(db_session_factory) == 1
 
 
 async def test_cross_user_purchase_is_rejected(db_session_factory, client):

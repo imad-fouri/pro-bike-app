@@ -67,10 +67,14 @@ disagree about "verified"):
    subscription system, no `is_pro`, no `premium_users`.
 8. The caller's freshly resolved state is returned.
 
-The event id is derived deterministically
-(`verify:<provider>:<subscription>:<occurred_at>`): re-verifying the same
-purchase replays the same event (duplicate-ignored), while a renewal carries
-a new timestamp and processes in order. This assumes providers supply stable,
+The event id is a bounded deterministic digest
+(`verify:<provider>:<sha256 of "subscription_id|transaction_id|occurred_at"
+truncated to 40 hex>`): re-verifying the same purchase replays the same event
+(duplicate-ignored), while a renewal carries a new timestamp — and, for real
+providers, a new transaction identity — and processes in order. The WS-RP
+audit (§8.3) replaced the original readable form because Apple transaction
+ids could push it past the 128-character event column; the digest is bounded
+and equally deterministic. This still assumes providers supply stable,
 monotonic event times — documented here so a future adapter that cannot is
 caught in review rather than in production.
 
