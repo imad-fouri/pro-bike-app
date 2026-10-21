@@ -9,9 +9,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('brand tokens match docs/11', () {
-    expect(AppColors.primary, const Color(0xFF7BC043));
-    expect(AppColors.background, const Color(0xFF0A1F1C));
-    expect(AppColors.primaryDark, const Color(0xFF2E7D32));
+    expect(AppColors.primary, const Color(0xFFE9A23B));
+    expect(AppColors.background, const Color(0xFF0B0D11));
+    expect(AppColors.primaryDark, const Color(0xFF7F6232));
   });
 
   test('l10n en/fr/ar resolve without hard-coded widget strings', () {
